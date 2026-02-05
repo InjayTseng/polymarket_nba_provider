@@ -12,6 +12,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import pdfplumber
 import requests
+from requests import exceptions as requests_exceptions
+import socks
+import urllib3
 from bs4 import BeautifulSoup
 from nba_api.stats.endpoints import (
     scoreboardv2,
@@ -127,6 +130,15 @@ def _refresh_proxy_pool(force: bool = False) -> None:
         _PROXY_STATE["last_refresh"] = now
 
 
+def _ban_proxy(proxy: str | None) -> None:
+    if not proxy:
+        return
+    proxies = _PROXY_STATE["proxies"]
+    if proxy in proxies:
+        proxies.remove(proxy)
+        print(f"proxy removed: {proxy}")
+
+
 def _next_proxy() -> str | None:
     proxies: list[str] = _PROXY_STATE["proxies"]
     if not proxies:
@@ -142,7 +154,7 @@ def _proxy_context():
         yield None
         return
 
-    _PROXY_LOCK.acquire()
+        _PROXY_LOCK.acquire()
     proxy = None
     prev_http = os.environ.get("HTTP_PROXY")
     prev_https = os.environ.get("HTTPS_PROXY")
@@ -255,10 +267,24 @@ def _with_retries(fn: Callable[[], T]) -> T:
 
     for attempt in range(retries + 1):
         try:
-            with _proxy_context():
+            with _proxy_context() as proxy:
                 return fn()
         except Exception as exc:
             last_exc = exc
+            if proxy and isinstance(
+                exc,
+                (
+                    requests_exceptions.ProxyError,
+                    requests_exceptions.ConnectTimeout,
+                    requests_exceptions.ReadTimeout,
+                    requests_exceptions.SSLError,
+                    urllib3.exceptions.ProxyError,
+                    urllib3.exceptions.ConnectTimeoutError,
+                    socks.ProxyConnectionError,
+                    OSError,
+                )
+            ):
+                _ban_proxy(proxy)
             if attempt >= retries:
                 break
             sleep_ms = backoff_ms * (2 ** attempt)

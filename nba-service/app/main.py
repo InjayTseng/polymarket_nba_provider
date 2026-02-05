@@ -154,7 +154,7 @@ def _proxy_context():
         yield None
         return
 
-        _PROXY_LOCK.acquire()
+    _PROXY_LOCK.acquire()
     proxy = None
     prev_http = os.environ.get("HTTP_PROXY")
     prev_https = os.environ.get("HTTPS_PROXY")

@@ -1,0 +1,79 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: polymarket_nba_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: polymarket_nba
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d polymarket_nba"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: polymarket_nba_backend
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/polymarket_nba
+      NBA_SERVICE_BASE: http://nba_service:8000
+      POLYMARKET_BASE: https://gamma-api.polymarket.com
+      POLYMARKET_NBA_SYNC_ENABLED: "true"
+      POLYMARKET_NBA_SYNC_CRON: "*/5 * * * *"
+      POLYMARKET_NBA_ACTIVE: "true"
+      POLYMARKET_NBA_CLOSED: "false"
+      POLYMARKET_NBA_PAGE_SIZE: "50"
+      POLYMARKET_NBA_MAX_PAGES: "5"
+      NBA_INJURY_REPORT_CRON: "30 * * * *"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: polymarket_nba_frontend
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:3000
+      INTERNAL_API_BASE: http://backend:3000
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+
+  nba_service:
+    build:
+      context: ./nba-service
+    container_name: polymarket_nba_nba_service
+    environment:
+      NBA_API_TIMEOUT: 30
+      NBA_API_RETRY: 2
+      NBA_API_RETRY_BACKOFF_MS: 500
+      NBA_INJURY_REPORT_INDEX_URL: https://official.nba.com/nba-injury-report-2020-21-season/
+    ports:
+      - "8000:8000"
+
+  redis:
+    image: redis:7-alpine
+    container_name: polymarket_nba_redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  db_data:

@@ -27,7 +27,6 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
-      CORS_ORIGIN: http://localhost:3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-polymarket_nba}
       NBA_SERVICE_BASE: http://nba_service:8000
       POLYMARKET_BASE: https://gamma-api.polymarket.com

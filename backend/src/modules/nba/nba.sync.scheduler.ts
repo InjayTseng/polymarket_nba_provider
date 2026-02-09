@@ -16,6 +16,47 @@ export class NbaSyncScheduler {
     @InjectRepository(Game) private readonly gameRepo: Repository<Game>
   ) {}
 
+  private resolveDateInputTimeZone(): string {
+    // Date inputs (YYYY-MM-DD) are treated as "game dates" in this time zone.
+    // Default to ET to match NBA schedule semantics.
+    const raw =
+      this.configService.get<string>("NBA_SYNC_DATE_TZ") ||
+      this.configService.get<string>("NBA_DATE_INPUT_TZ") ||
+      "America/New_York";
+
+    const upper = raw.toUpperCase();
+    if (upper === "ET" || upper === "EST" || upper === "EDT") {
+      return "America/New_York";
+    }
+    if (upper === "AMERICA/NEW_YORK") {
+      return "America/New_York";
+    }
+    if (upper === "UTC") {
+      return "UTC";
+    }
+    return raw;
+  }
+
+  private formatDateInTimeZone(date: Date, timeZone: string): string {
+    if (timeZone.toUpperCase() === "UTC") {
+      return date.toISOString().slice(0, 10);
+    }
+
+    try {
+      // en-CA yields YYYY-MM-DD with numeric year/month/day.
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(date);
+    } catch {
+      // If the runtime lacks tzdata/ICU support for the configured time zone,
+      // fall back to UTC rather than crashing the scheduler.
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
   private resolveDate(explicit?: string) {
     return explicit || this.formatToday();
   }
@@ -55,18 +96,8 @@ export class NbaSyncScheduler {
   }
 
   private formatToday() {
-    const tzRaw =
-      this.configService.get<string>("NBA_SYNC_DATE_TZ") || "UTC";
-    const tz = tzRaw.toUpperCase();
-    if (tz === "ET" || tz === "EST" || tz === "EDT" || tz === "AMERICA/NEW_YORK") {
-      return new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/New_York",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).format(new Date());
-    }
-    return new Date().toISOString().slice(0, 10);
+    const tz = this.resolveDateInputTimeZone();
+    return this.formatDateInTimeZone(new Date(), tz);
   }
 
   @Cron(process.env.NBA_SCOREBOARD_CRON || "*/10 * * * *")
@@ -190,19 +221,20 @@ export class NbaSyncScheduler {
       return;
     }
 
-    const dates = Array.from(
-      new Set(staleGames.map((game) => game.dateTimeUtc.toISOString().slice(0, 10)))
+    const tz = this.resolveDateInputTimeZone();
+    const datesInTz = Array.from(
+      new Set(staleGames.map((game) => this.formatDateInTimeZone(game.dateTimeUtc, tz)))
     ).slice(0, maxDates);
 
     // Enqueue scoreboard first, then final results for each date so that status updates land first.
-    const jobs = dates.flatMap((date) => [
+    const jobs = datesInTz.flatMap((date) => [
       { name: "sync-scoreboard", data: { date } },
       { name: "sync-final-results", data: { date } }
     ]);
     await this.queue.addBulk(jobs as any);
 
     this.logger.warn(
-      `[cron] stale scheduled games: games=${staleGames.length} dates=${dates.length} cutoff=${cutoff.toISOString()}`
+      `[cron] stale scheduled games: games=${staleGames.length} dates=${datesInTz.length} cutoff=${cutoff.toISOString()}`
     );
   }
 }

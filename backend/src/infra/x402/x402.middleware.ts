@@ -112,6 +112,9 @@ export function createX402Middleware(): RequestHandler | null {
   const analysisPrice = process.env.X402_ANALYSIS_PRICE || oneTimePrice;
   const analysisDescription =
     process.env.X402_ANALYSIS_DESCRIPTION || "NBA AI analysis access";
+  const a2aPrice = process.env.X402_A2A_PRICE || analysisPrice;
+  const a2aDescription =
+    process.env.X402_A2A_DESCRIPTION || "A2A paid task access";
 
   const protectedRoutes: ProtectedRoute[] = [
     {
@@ -119,6 +122,13 @@ export function createX402Middleware(): RequestHandler | null {
       path: "/nba/analysis",
       price: analysisPrice,
       description: analysisDescription,
+      mimeType: "application/json",
+    },
+    {
+      method: "POST",
+      path: "/a2a/tasks",
+      price: a2aPrice,
+      description: a2aDescription,
       mimeType: "application/json",
     },
   ];
@@ -212,6 +222,18 @@ export function createX402Middleware(): RequestHandler | null {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!protectedRouteKeys.has(buildRouteKey(req.method, req.path))) {
       return next();
+    }
+
+    // Allow a subset of A2A capabilities without payment.
+    // Because x402 runs at middleware level, we gate by query string to avoid consuming body streams.
+    if (req.method.toUpperCase() === "POST" && req.path === "/a2a/tasks") {
+      const capabilityRaw = (req.query as any)?.capability;
+      const capability =
+        typeof capabilityRaw === "string" ? capabilityRaw.trim() : "";
+      const free = new Set(["nba.matchup_brief"]);
+      if (free.has(capability)) {
+        return next();
+      }
     }
 
     applyCorsHeaders(req, res, allowedMethods);

@@ -35,6 +35,7 @@
 - Polymarket NBA 同步流程、排程、Entity：`nba-ingestion-guide.md`
 
 **常見任務**
+- 注意：所有同步/查詢用到的 `YYYY-MM-DD`（`date/from/to`）預設以美東時間（`America/New_York`, ET）的「比賽日」解讀（可用 `NBA_DATE_INPUT_TZ` 覆寫）。
 - 若要限制為 NBA：依 `nba-ingestion-guide.md` 建議，加入 `series_id` / `tag_id` 參數並採用專用 offset key。
 - 若要補齊 NBA 球員與賽程：依 `nba-api-sync.md` 指示執行對應的 `sync:*` 任務。
 - 需要手動跑 migration 時：`npm run migration:run`（於 `backend/` 內）

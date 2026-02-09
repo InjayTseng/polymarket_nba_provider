@@ -27,6 +27,16 @@ export class ClobClient {
     return this.getJson(`/book?${params.toString()}`);
   }
 
+  // Best-effort; endpoint availability can vary. Caller should handle errors.
+  async getRecentTrades(tokenId: string, limit = 50) {
+    const capped = Math.max(1, Math.min(200, Math.floor(limit)));
+    const params = new URLSearchParams({
+      token_id: tokenId,
+      limit: String(capped)
+    });
+    return this.getJson(`/trades?${params.toString()}`);
+  }
+
   private async getJson(path: string): Promise<any> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: this.headers

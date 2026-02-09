@@ -48,6 +48,7 @@ import { Market } from "../polymarket/entities/market.entity";
     })
   ],
   providers: [NbaService, NbaSyncProcessor, NbaSyncScheduler],
-  controllers: [NbaController]
+  controllers: [NbaController],
+  exports: [NbaService]
 })
 export class NbaModule {}

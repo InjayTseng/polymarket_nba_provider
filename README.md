@@ -87,12 +87,13 @@ docker compose up --build
 - `http://localhost:3000/health`（Backend）
 - `http://localhost:3001`（Frontend）
 - `http://localhost:8000/health`（NBA service）
-- Swagger: `http://localhost:3000/docs`
+- Swagger: `http://localhost:3000/docs`（prod 預設關閉；需設 `SWAGGER_ENABLED=true`）
 
 Backend 容器啟動前會先執行 DB migration（見 `backend/docker-entrypoint.sh`）。
 
 **常用 API（Backend）**
 NBA 查詢：
+- 注意：所有 `YYYY-MM-DD` 的 `date/from/to` 預設以美東時間（`America/New_York`, ET）的「比賽日」解讀（可用 `NBA_DATE_INPUT_TZ` 覆寫）。
 - `GET /nba/teams`
 - `GET /nba/games?date=YYYY-MM-DD`
 - `GET /nba/players?search=&teamId=&season=`
@@ -108,10 +109,25 @@ Polymarket 查詢：
 - `GET /polymarket/price?marketIds=...`（CLOB live price）
 - `GET /polymarket/orderbook?marketIds=...`
 
+x402 / A2A Agent：
+- `GET /.well-known/agent-card.json`（能力宣告與入口）
+- `POST /a2a/tasks?capability=nba.matchup_brief`（免費；body 放 `input` 或直接放參數）
+- `POST /a2a/tasks?capability=nba.matchup_full`（x402 付費）
+- `GET /a2a/tasks/:id`（查狀態/結果）
+- `GET /a2a/tasks/:id/events`（SSE 串流）
+- `POST /a2a/tasks/:id/cancel`（取消，best-effort）
+
+MCP Server（HTTP JSON-RPC）：
+- `POST /mcp`
+  - `initialize`
+  - `tools/list`
+  - `tools/call`（第一批工具：`nba.getGameContext`, `pm.getPrices`, `analysis.nbaMatchup`, `analysis.computeEdge`, `pm.getRecentTrades`, `ops.getFreshness`）
+
 x402 付費端點：
 - `POST /nba/analysis`（每次支付後可呼叫 AI 分析；使用 `date+home+away`）
 
 **NBA Service API（FastAPI）**
+- 注意：`date=YYYY-MM-DD` 預設以美東時間（ET）的比賽日傳入（與 NBA 官方 `GAME_DATE_EST` 一致）。
 - `GET /scoreboard?date=YYYY-MM-DD`
 - `GET /schedule?date=YYYY-MM-DD` 或 `GET /schedule?from=YYYY-MM-DD&to=YYYY-MM-DD`
 - `GET /boxscore/traditional?game_id=...`
@@ -123,6 +139,7 @@ x402 付費端點：
 
 **手動同步（Backend）**
 HTTP 觸發：
+- 注意：`date/from/to` 一律以美東時間（ET）的比賽日傳入。
 - `POST /nba/sync/scoreboard?date=YYYY-MM-DD`
 - `POST /nba/sync/final-results?date=YYYY-MM-DD`
 - `POST /nba/sync/players?season=2024-25`

@@ -6,6 +6,8 @@ import { join } from "path";
 import { NbaModule } from "./modules/nba/nba.module";
 import { PolymarketModule } from "./modules/polymarket/polymarket.module";
 import { X402Module } from "./modules/x402/x402.module";
+import { A2AModule } from "./modules/a2a/a2a.module";
+import { McpModule } from "./modules/mcp/mcp.module";
 import { BullModule } from "@nestjs/bullmq";
 import { ScheduleModule } from "@nestjs/schedule";
 
@@ -33,7 +35,9 @@ import { ScheduleModule } from "@nestjs/schedule";
     }),
     NbaModule,
     PolymarketModule,
-    X402Module
+    X402Module,
+    A2AModule,
+    McpModule
   ],
   controllers: [HealthController]
 })

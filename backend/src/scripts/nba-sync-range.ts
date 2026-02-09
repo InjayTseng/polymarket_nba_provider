@@ -7,13 +7,29 @@ function parseArgs() {
   const args = process.argv.slice(2);
   const options: Record<string, string> = {};
 
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
     if (!arg.startsWith("--")) {
       continue;
     }
-    const [key, value] = arg.slice(2).split("=");
-    if (key && value !== undefined) {
-      options[key] = value;
+
+    const raw = arg.slice(2);
+    const eqIndex = raw.indexOf("=");
+    if (eqIndex >= 0) {
+      const key = raw.slice(0, eqIndex);
+      const value = raw.slice(eqIndex + 1);
+      if (key && value !== undefined) {
+        options[key] = value;
+      }
+      continue;
+    }
+
+    // Support `--from 2026-02-01` style flags too.
+    const key = raw;
+    const next = args[i + 1];
+    if (key && next !== undefined && !next.startsWith("--")) {
+      options[key] = next;
+      i += 1;
     }
   }
 
@@ -64,6 +80,10 @@ async function run() {
   if (!["scoreboard", "final", "player", "both"].includes(mode)) {
     throw new Error("mode must be scoreboard|final|player|both");
   }
+
+  console.log(
+    `[nba:sync:range] from=${from} to=${to} mode=${mode} NBA_SERVICE_BASE=${process.env.NBA_SERVICE_BASE || ""} DATABASE_URL=${process.env.DATABASE_URL || ""}`
+  );
 
   const maxDays = Number(process.env.NBA_SYNC_RANGE_MAX_DAYS || 0);
   const dates = expandDates(from, to, maxDays);

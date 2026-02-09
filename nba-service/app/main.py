@@ -64,6 +64,11 @@ PROXY_TIMEOUT_SEC = max(
     1,
     int(os.getenv("NBA_PROXY_TIMEOUT", "10"))
 )
+PROXY_FALLBACK_DIRECT = os.getenv("NBA_PROXY_FALLBACK_DIRECT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 _PROXY_STATE = {"proxies": [], "index": 0, "last_refresh": 0.0}
 _PROXY_LOCK = threading.Lock()
 _PROXY_REFRESH_STARTED = False
@@ -204,6 +209,44 @@ def _proxy_context():
         _PROXY_LOCK.release()
 
 
+@contextmanager
+def _no_proxy_context():
+    prev_http = os.environ.get("HTTP_PROXY")
+    prev_https = os.environ.get("HTTPS_PROXY")
+    try:
+        os.environ.pop("HTTP_PROXY", None)
+        os.environ.pop("HTTPS_PROXY", None)
+        yield
+    finally:
+        if prev_http is None:
+            os.environ.pop("HTTP_PROXY", None)
+        else:
+            os.environ["HTTP_PROXY"] = prev_http
+        if prev_https is None:
+            os.environ.pop("HTTPS_PROXY", None)
+        else:
+            os.environ["HTTPS_PROXY"] = prev_https
+
+
+def _upstream_error_detail(exc: Exception) -> dict:
+    message = str(exc)
+    if len(message) > 400:
+        message = message[:400] + "..."
+    hint = None
+    if "Tunnel connection failed: 405" in message:
+        hint = "proxy_connect_method_not_allowed"
+    elif "Unable to connect to proxy" in message:
+        hint = "proxy_connect_failed"
+    elif "Read timed out" in message or "timed out" in message:
+        hint = "upstream_timeout"
+    return {
+        "error": "upstream_request_failed",
+        "message": message,
+        "hint": hint,
+        "proxy_enabled": PROXY_ENABLED,
+    }
+
+
 @app.on_event("startup")
 def _start_proxy_refresh() -> None:
     global _PROXY_REFRESH_STARTED
@@ -297,10 +340,12 @@ def _with_retries(fn: Callable[[], T]) -> T:
     retries = int(os.getenv("NBA_API_RETRY", "2"))
     backoff_ms = int(os.getenv("NBA_API_RETRY_BACKOFF_MS", "500"))
     last_exc: Exception | None = None
+    had_proxy_attempt = False
 
     for attempt in range(retries + 1):
         try:
             with _proxy_context() as proxy:
+                had_proxy_attempt = had_proxy_attempt or bool(proxy)
                 return fn()
         except Exception as exc:
             last_exc = exc
@@ -322,6 +367,15 @@ def _with_retries(fn: Callable[[], T]) -> T:
                 break
             sleep_ms = backoff_ms * (2 ** attempt)
             time.sleep(sleep_ms / 1000)
+
+    # If proxies are enabled and we actually tried a proxy, do one last direct attempt.
+    # This prevents transient proxy pool issues from causing hard failures when the upstream is reachable directly.
+    if PROXY_ENABLED and PROXY_FALLBACK_DIRECT and had_proxy_attempt:
+        try:
+            with _no_proxy_context():
+                return fn()
+        except Exception as exc:
+            last_exc = exc
 
     if last_exc:
         raise last_exc
@@ -880,26 +934,29 @@ async def boxscore_traditional(game_id: str = Query(..., description="NBA GAME_I
     timeout = _resolve_timeout(int(os.getenv("NBA_API_TIMEOUT", "30")))
 
     try:
-        payload = _with_retries(
-            lambda: boxscoretraditionalv3.BoxScoreTraditionalV3(
-                game_id=game_id, timeout=timeout
-            ).get_dict()
-        )
-    except Exception:
-        payload = _with_retries(
-            lambda: _fetch_boxscore_raw(
-                boxscoretraditionalv3.BoxScoreTraditionalV3.endpoint,
-                game_id,
-                timeout
+        try:
+            payload = _with_retries(
+                lambda: boxscoretraditionalv3.BoxScoreTraditionalV3(
+                    game_id=game_id, timeout=timeout
+                ).get_dict()
             )
-        )
+        except Exception:
+            payload = _with_retries(
+                lambda: _fetch_boxscore_raw(
+                    boxscoretraditionalv3.BoxScoreTraditionalV3.endpoint,
+                    game_id,
+                    timeout
+                )
+            )
 
-    boxscore = payload.get("boxScoreTraditional", {})
+        boxscore = payload.get("boxScoreTraditional", {})
 
-    return {
-        "team_stats": _team_stats_from_boxscore(boxscore),
-        "player_stats": _player_stats_from_boxscore(boxscore)
-    }
+        return {
+            "team_stats": _team_stats_from_boxscore(boxscore),
+            "player_stats": _player_stats_from_boxscore(boxscore)
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=_upstream_error_detail(exc)) from exc
 
 
 @app.get("/boxscore/advanced")
@@ -907,25 +964,28 @@ async def boxscore_advanced(game_id: str = Query(..., description="NBA GAME_ID")
     timeout = _resolve_timeout(int(os.getenv("NBA_API_TIMEOUT", "30")))
 
     try:
-        payload = _with_retries(
-            lambda: boxscoreadvancedv3.BoxScoreAdvancedV3(
-                game_id=game_id, timeout=timeout
-            ).get_dict()
-        )
-    except Exception:
-        payload = _with_retries(
-            lambda: _fetch_boxscore_raw(
-                boxscoreadvancedv3.BoxScoreAdvancedV3.endpoint,
-                game_id,
-                timeout
+        try:
+            payload = _with_retries(
+                lambda: boxscoreadvancedv3.BoxScoreAdvancedV3(
+                    game_id=game_id, timeout=timeout
+                ).get_dict()
             )
-        )
+        except Exception:
+            payload = _with_retries(
+                lambda: _fetch_boxscore_raw(
+                    boxscoreadvancedv3.BoxScoreAdvancedV3.endpoint,
+                    game_id,
+                    timeout
+                )
+            )
 
-    boxscore = payload.get("boxScoreAdvanced", {})
+        boxscore = payload.get("boxScoreAdvanced", {})
 
-    return {
-        "team_stats": _team_stats_from_boxscore(boxscore)
-    }
+        return {
+            "team_stats": _team_stats_from_boxscore(boxscore)
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=_upstream_error_detail(exc)) from exc
 
 
 @app.get("/players/all")

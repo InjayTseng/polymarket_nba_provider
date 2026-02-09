@@ -24,6 +24,7 @@ import { IngestionState } from "./entities/ingestion-state.entity";
     ])
   ],
   controllers: [PolymarketController],
-  providers: [GammaClient, ClobClient, PolymarketService, PolymarketScheduler]
+  providers: [GammaClient, ClobClient, PolymarketService, PolymarketScheduler],
+  exports: [ClobClient, PolymarketService]
 })
 export class PolymarketModule {}

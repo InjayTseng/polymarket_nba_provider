@@ -120,6 +120,7 @@ export type GameAnalysisResult = {
 export class NbaService {
   private readonly nbaBase: string;
   private openaiClient: any | null = null;
+  private readonly dateInputTimeZone: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -149,6 +150,11 @@ export class NbaService {
     this.nbaBase =
       this.configService.get<string>("NBA_SERVICE_BASE") ||
       "http://nba_service:8000";
+    // Interpret all YYYY-MM-DD inputs as "game dates" in this time zone.
+    // Default: Eastern Time to match NBA schedule conventions.
+    this.dateInputTimeZone =
+      this.configService.get<string>("NBA_DATE_INPUT_TZ") ||
+      "America/New_York";
   }
 
   async syncScoreboard(
@@ -2578,73 +2584,69 @@ export class NbaService {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  private dateRange(date: string): { start: Date; end: Date } {
-    const parsed = this.parseDate(date);
-    const start = new Date(
-      Date.UTC(
-        parsed.getUTCFullYear(),
-        parsed.getUTCMonth(),
-        parsed.getUTCDate(),
-        0,
-        0,
-        0
-      )
-    );
-    const end = new Date(
-      Date.UTC(
-        parsed.getUTCFullYear(),
-        parsed.getUTCMonth(),
-        parsed.getUTCDate(),
-        23,
-        59,
-        59,
-        999
-      )
-    );
+  private parseDateParts(value: string) {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error("date must be YYYY-MM-DD");
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const probe = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+    if (
+      probe.getUTCFullYear() !== year ||
+      probe.getUTCMonth() + 1 !== month ||
+      probe.getUTCDate() !== day
+    ) {
+      throw new Error("date must be a valid calendar date YYYY-MM-DD");
+    }
+    return { year, month, day };
+  }
 
+  private nextDateParts(parts: { year: number; month: number; day: number }) {
+    const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0));
+    date.setUTCDate(date.getUTCDate() + 1);
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate()
+    };
+  }
+
+  private dateRangeInTimeZone(
+    date: string,
+    timeZone: string
+  ): { start: Date; end: Date } {
+    const parts = this.parseDateParts(date);
+    const start = this.zonedTimeToUtc(
+      { ...parts, hour: 0, minute: 0 },
+      timeZone
+    );
+    const next = this.nextDateParts(parts);
+    const nextStart = this.zonedTimeToUtc(
+      { ...next, hour: 0, minute: 0 },
+      timeZone
+    );
+    const end = new Date(nextStart.getTime() - 1);
     return { start, end };
   }
 
+  private dateRange(date: string): { start: Date; end: Date } {
+    return this.dateRangeInTimeZone(date, this.dateInputTimeZone);
+  }
+
   private dateRangeBetween(from: string, to: string): { start: Date; end: Date } {
-    const startDate = this.parseDate(from);
-    const endDate = this.parseDate(to);
-
-    const start = new Date(
-      Date.UTC(
-        startDate.getUTCFullYear(),
-        startDate.getUTCMonth(),
-        startDate.getUTCDate(),
-        0,
-        0,
-        0,
-        0
-      )
-    );
-    const end = new Date(
-      Date.UTC(
-        endDate.getUTCFullYear(),
-        endDate.getUTCMonth(),
-        endDate.getUTCDate(),
-        23,
-        59,
-        59,
-        999
-      )
-    );
-
+    const start = this.dateRange(from).start;
+    const end = this.dateRange(to).end;
     if (end.getTime() < start.getTime()) {
       throw new Error("to must be >= from");
     }
-
     return { start, end };
   }
 
   private parseDate(value: string): Date {
-    const parsed = new Date(`${value}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new Error("date must be YYYY-MM-DD");
-    }
-    return parsed;
+    const parts = this.parseDateParts(value);
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0));
   }
 
   private pickString(row: Record<string, any>, keys: string[]): string | null {

@@ -89,6 +89,23 @@ function teamTagStyle(abbrev?: string) {
   return { background: color.bg, color: color.text };
 }
 
+function formatDateInTimeZone(date: Date, timeZone: string) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const parts = dtf.formatToParts(date);
+  const values: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      values[part.type] = part.value;
+    }
+  }
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 export default async function Home({
   searchParams
 }: {
@@ -98,7 +115,7 @@ export default async function Home({
   const date = getParam(
     resolvedSearchParams,
     "date",
-    new Date().toISOString().slice(0, 10)
+    formatDateInTimeZone(new Date(), "America/New_York")
   );
 
   const [teams, games] = await Promise.all([

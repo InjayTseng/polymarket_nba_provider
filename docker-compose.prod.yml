@@ -63,8 +63,8 @@ services:
       NBA_INJURY_REPORT_CRON: "30 * * * *"
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Default off in production; set to true only when you explicitly want it.
-      # SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      # Swagger is disabled by default in production in code unless explicitly enabled.
+      SWAGGER_ENABLED: "true"
     depends_on:
       db:
         condition: service_healthy

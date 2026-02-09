@@ -108,20 +108,55 @@ export function createX402Middleware(): RequestHandler | null {
     return null;
   }
 
+  const oneTimePrice = process.env.X402_PRICE || "$0.001";
+  const analysisPrice = process.env.X402_ANALYSIS_PRICE || oneTimePrice;
+  const analysisDescription =
+    process.env.X402_ANALYSIS_DESCRIPTION || "NBA AI analysis access";
+
+  const protectedRoutes: ProtectedRoute[] = [
+    {
+      method: "POST",
+      path: "/nba/analysis",
+      price: analysisPrice,
+      description: analysisDescription,
+      mimeType: "application/json",
+    },
+  ];
+  const protectedRouteKeys = new Set(
+    protectedRoutes.map((route) => buildRouteKey(route.method, route.path))
+  );
+  const allowedMethods = Array.from(
+    new Set([
+      ...protectedRoutes.map((route) => route.method.toUpperCase()),
+      "OPTIONS",
+    ])
+  ).join(", ");
+
   const payTo = process.env.X402_PAY_TO;
   if (!payTo) {
-    throw new Error(
-      "X402_PAY_TO is required unless X402_ENABLED=false (USDC recipient address).",
+    // Don't crash the whole API for a single protected route misconfiguration.
+    console.error(
+      "[x402] disabled: X402_PAY_TO is required unless X402_ENABLED=false (USDC recipient address)."
     );
+    return (req: Request, res: Response, next: NextFunction) => {
+      if (!protectedRouteKeys.has(buildRouteKey(req.method, req.path))) {
+        return next();
+      }
+      applyCorsHeaders(req, res, allowedMethods);
+      if (req.method.toUpperCase() === "OPTIONS") {
+        res.status(204).end();
+        return;
+      }
+      res.status(503).json({
+        error: "x402_not_configured",
+        message: "x402 is not configured on this server",
+      });
+    };
   }
 
   const facilitatorUrl =
     process.env.X402_FACILITATOR_URL || "https://www.x402.org/facilitator";
   const network = process.env.X402_NETWORK || "eip155:84532";
-  const oneTimePrice = process.env.X402_PRICE || "$0.001";
-  const analysisPrice = process.env.X402_ANALYSIS_PRICE || oneTimePrice;
-  const analysisDescription =
-    process.env.X402_ANALYSIS_DESCRIPTION || "NBA AI analysis access";
 
   const cdpApiKeyId =
     process.env.CDP_API_KEY_ID || process.env.X402_CDP_API_KEY_ID;
@@ -137,45 +172,42 @@ export function createX402Middleware(): RequestHandler | null {
 
   const useCoinbaseFacilitator = Boolean(cdpApiKeyId && cdpApiKeySecret);
   if (useCoinbaseFacilitator && !coinbaseFacilitator) {
-    throw new Error(
-      "CDP API keys provided but @coinbase/x402 facilitator is unavailable.",
+    console.error(
+      "[x402] initialization failed: CDP API keys provided but @coinbase/x402 facilitator is unavailable."
     );
+    // Continue booting; protected routes will return 503.
   }
 
   const facilitator = useCoinbaseFacilitator
     ? new HTTPFacilitatorClient(coinbaseFacilitator)
     : new HTTPFacilitatorClient({ url: facilitatorUrl });
-  const server = new x402ResourceServer(facilitator).register(
-    network,
-    new ExactEvmScheme(),
-  );
-
-  const protectedRoutes: ProtectedRoute[] = [
-    {
-      method: "POST",
-      path: "/nba/analysis",
-      price: analysisPrice,
-      description: analysisDescription,
-      mimeType: "application/json",
-    },
-  ];
-
-  const routes = Object.fromEntries(
-    protectedRoutes.map((route) => [
-      buildRouteKey(route.method, route.path),
-      {
-        accepts: [{ scheme: "exact", network, price: route.price, payTo }],
-        description: route.description,
-        mimeType: route.mimeType ?? "application/json",
-      },
-    ])
-  );
-  const protectedRouteKeys = new Set(Object.keys(routes));
-  const allowedMethods = Array.from(
-    new Set([...protectedRoutes.map((route) => route.method.toUpperCase()), "OPTIONS"])
-  ).join(", ");
-
-  const x402Middleware = paymentMiddleware(routes, server);
+  let x402Middleware: RequestHandler | null = null;
+  try {
+    if (useCoinbaseFacilitator && !coinbaseFacilitator) {
+      throw new Error("@coinbase/x402 facilitator unavailable");
+    }
+    const server = new x402ResourceServer(facilitator).register(
+      network,
+      new ExactEvmScheme(),
+    );
+    const routes = Object.fromEntries(
+      protectedRoutes.map((route) => [
+        buildRouteKey(route.method, route.path),
+        {
+          accepts: [{ scheme: "exact", network, price: route.price, payTo }],
+          description: route.description,
+          mimeType: route.mimeType ?? "application/json",
+        },
+      ])
+    );
+    x402Middleware = paymentMiddleware(routes, server);
+  } catch (err: any) {
+    console.error(
+      "[x402] initialization failed; protected routes will return 503.",
+      err
+    );
+    x402Middleware = null;
+  }
 
   return (req: Request, res: Response, next: NextFunction) => {
     if (!protectedRouteKeys.has(buildRouteKey(req.method, req.path))) {
@@ -185,6 +217,14 @@ export function createX402Middleware(): RequestHandler | null {
     applyCorsHeaders(req, res, allowedMethods);
     if (req.method.toUpperCase() === "OPTIONS") {
       res.status(204).end();
+      return;
+    }
+
+    if (!x402Middleware) {
+      res.status(503).json({
+        error: "x402_unavailable",
+        message: "x402 facilitator is unavailable; try again later",
+      });
       return;
     }
 

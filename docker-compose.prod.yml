@@ -137,4 +137,5 @@ volumes:
 networks:
   public:
   internal:
-    internal: true
+    # NOTE: `internal: true` blocks outbound internet for containers on this network.
+    # Backend needs outbound access (OpenAI, Polymarket Gamma, x402 facilitator, etc.).

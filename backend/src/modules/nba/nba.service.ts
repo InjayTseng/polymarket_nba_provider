@@ -18,6 +18,7 @@ import { PlayerSeasonTeam } from "./entities/player-season-team.entity";
 import { DataConflict } from "./entities/data-conflict.entity";
 import { InjuryReport } from "./entities/injury-report.entity";
 import { InjuryReportEntry } from "./entities/injury-report-entry.entity";
+import { NbaAnalysisLog } from "./entities/nba-analysis-log.entity";
 import { Event } from "../polymarket/entities/event.entity";
 import { Market } from "../polymarket/entities/market.entity";
 
@@ -138,6 +139,8 @@ export class NbaService {
     private readonly injuryReportRepo: Repository<InjuryReport>,
     @InjectRepository(InjuryReportEntry)
     private readonly injuryReportEntryRepo: Repository<InjuryReportEntry>,
+    @InjectRepository(NbaAnalysisLog)
+    private readonly nbaAnalysisLogRepo: Repository<NbaAnalysisLog>,
     @InjectRepository(Event)
     private readonly eventRepo: Repository<Event>,
     @InjectRepository(Market)
@@ -1059,6 +1062,26 @@ export class NbaService {
     }
 
     return this.runAnalysis(context, options);
+  }
+
+  async recordAnalysisLog(input: {
+    payerAddress?: string | null;
+    sessionId?: string | null;
+    requestParams: Record<string, any>;
+    response?: Record<string, any> | null;
+    error?: string | null;
+  }) {
+    try {
+      await this.nbaAnalysisLogRepo.insert({
+        payerAddress: input.payerAddress ?? null,
+        sessionId: input.sessionId ?? null,
+        requestParams: input.requestParams,
+        response: input.response ?? null,
+        error: input.error ?? null
+      });
+    } catch {
+      // Best-effort audit log only; never block API response.
+    }
   }
 
   async recordConflict(input: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   useAccount,
@@ -276,6 +276,7 @@ export function X402Client() {
     away: ""
   });
   const [autoGameLabel, setAutoGameLabel] = useState<string | null>(null);
+  const didAutofillRef = useRef(false);
 
   const isOnBase = chain?.id === baseSepolia.id;
   const { data: usdcBalanceRaw, isLoading: isUsdcLoading, error: usdcError } =
@@ -357,10 +358,10 @@ export function X402Client() {
     );
   };
 
+  // Auto-fill runs once on mount to avoid spamming /nba/teams and /nba/games while typing.
   useEffect(() => {
-    if (analysisForm.home && analysisForm.away && analysisForm.date) {
-      return;
-    }
+    if (didAutofillRef.current) return;
+    didAutofillRef.current = true;
 
     const controller = new AbortController();
     const fetchTodayFirstGame = async () => {
@@ -408,15 +409,17 @@ export function X402Client() {
         const first = sorted[0] || games[0];
         const homeAbbrev = teamMap.get(first?.homeTeamId) || "";
         const awayAbbrev = teamMap.get(first?.awayTeamId) || "";
-        setAnalysisForm((prev) => ({
-          ...prev,
-          date: prev.date || date,
-          home: prev.home || homeAbbrev,
-          away: prev.away || awayAbbrev
-        }));
-        if (homeAbbrev && awayAbbrev) {
-          setAutoGameLabel(`${awayAbbrev}@${homeAbbrev}`);
-        }
+        setAnalysisForm((prev) => {
+          // Don't overwrite user input if they started typing.
+          if (prev.date || prev.home || prev.away) return prev;
+          return {
+            ...prev,
+            date,
+            home: homeAbbrev,
+            away: awayAbbrev
+          };
+        });
+        if (homeAbbrev && awayAbbrev) setAutoGameLabel(`${awayAbbrev}@${homeAbbrev}`);
       } catch {
         // ignore
       }
@@ -427,7 +430,7 @@ export function X402Client() {
     return () => {
       controller.abort();
     };
-  }, [analysisForm.date, analysisForm.home, analysisForm.away]);
+  }, []);
 
   return (
     <div className="x402-body">

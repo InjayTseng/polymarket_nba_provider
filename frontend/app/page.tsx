@@ -92,10 +92,11 @@ function teamTagStyle(abbrev?: string) {
 export default async function Home({
   searchParams
 }: {
-  searchParams?: SearchParams;
+  searchParams?: Promise<SearchParams>;
 }) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const date = getParam(
-    searchParams,
+    resolvedSearchParams,
     "date",
     new Date().toISOString().slice(0, 10)
   );

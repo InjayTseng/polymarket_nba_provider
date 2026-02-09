@@ -5,12 +5,24 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
   ensureSessionId,
   isSessionPaid,
+  getSessionPayer,
   markSessionPaid,
+  setSessionPayer,
 } from "./x402.session";
+
+function normalizeOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
 
 const corsOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 
 type ProtectedRoute = {
@@ -35,7 +47,34 @@ try {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { decodePaymentRequiredHeader } = require("@x402/core/http");
+const {
+  decodePaymentRequiredHeader,
+  decodePaymentResponseHeader,
+  decodePaymentSignatureHeader,
+} = require("@x402/core/http");
+
+function extractPayerAddressFromPaymentPayload(
+  paymentPayload: any
+): string | null {
+  if (!paymentPayload || typeof paymentPayload !== "object") {
+    return null;
+  }
+  const payload = (paymentPayload as any).payload;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  // EIP-3009 payload: payload.authorization.from
+  const fromAuth = payload?.authorization?.from;
+  if (typeof fromAuth === "string" && fromAuth.length > 0) {
+    return fromAuth;
+  }
+  // Permit2 payload: payload.permit2Authorization.from
+  const fromPermit2 = payload?.permit2Authorization?.from;
+  if (typeof fromPermit2 === "string" && fromPermit2.length > 0) {
+    return fromPermit2;
+  }
+  return null;
+}
 
 function applyCorsHeaders(
   req: Request,
@@ -46,7 +85,9 @@ function applyCorsHeaders(
   if (!origin) {
     return;
   }
-  if (corsOrigins.length === 0 || corsOrigins.includes(origin)) {
+  const normalized = normalizeOrigin(origin);
+  if (corsOrigins.length === 0 || corsOrigins.includes(normalized)) {
+    // Per spec, you must echo the request Origin (not the normalized value).
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -154,6 +195,25 @@ export function createX402Middleware(): RequestHandler | null {
         : typeof req.headers["x-payment"] === "string"
           ? req.headers["x-payment"]
           : null;
+    let payerAddress: string | null = getSessionPayer(sessionId);
+    if (paymentHeader) {
+      try {
+        const decoded = decodePaymentSignatureHeader(paymentHeader);
+        const extracted = extractPayerAddressFromPaymentPayload(decoded);
+        if (extracted) {
+          payerAddress = extracted;
+          setSessionPayer(sessionId, extracted);
+        }
+      } catch {
+        // ignore decode failures
+      }
+    }
+    // Attach for downstream handlers (Nest controller can read this).
+    (req as any).x402 = {
+      sessionId,
+      payerAddress,
+      hasPaymentHeader: Boolean(paymentHeader),
+    };
     const debugEnabled =
       process.env.X402_DEBUG === "true" ||
       process.env.NODE_ENV !== "production";
@@ -173,6 +233,21 @@ export function createX402Middleware(): RequestHandler | null {
         res.getHeader("PAYMENT-RESPONSE") ||
         res.getHeader("X-PAYMENT-RESPONSE");
       if (paymentResponse) {
+        // Prefer settle response payer if present.
+        if (!payerAddress && typeof paymentResponse === "string") {
+          try {
+            const decoded = decodePaymentResponseHeader(paymentResponse);
+            if (decoded?.payer && typeof decoded.payer === "string") {
+              payerAddress = decoded.payer;
+              setSessionPayer(sessionId, decoded.payer);
+              if ((req as any).x402) {
+                (req as any).x402.payerAddress = decoded.payer;
+              }
+            }
+          } catch {
+            // ignore decode failures
+          }
+        }
         markSessionPaid(sessionId);
         sessionMarked = true;
       }

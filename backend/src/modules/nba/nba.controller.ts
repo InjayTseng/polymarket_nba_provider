@@ -3,11 +3,15 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
-  Query
+  Query,
+  Req,
 } from "@nestjs/common";
+import type { Request } from "express";
 import {
   ApiBody,
   ApiOkResponse,
@@ -34,13 +38,14 @@ import {
   PaginatedTeamGameStatDto,
   PlayerDto,
   SyncJobResponseDto,
-  SyncRangeResponseDto,
   TeamDto
 } from "./dto/swagger.dto";
 
 @Controller("nba")
 @ApiTags("NBA")
 export class NbaController {
+  private static readonly MANUAL_SYNC_COOLDOWN_MS = 30 * 60 * 1000;
+
   constructor(
     private readonly nbaService: NbaService,
     @InjectQueue("nba-sync") private readonly queue: Queue
@@ -54,7 +59,7 @@ export class NbaController {
     type: SyncJobResponseDto
   })
   async syncScoreboard(@Query("date") date?: string) {
-    return this.queue.add("sync-scoreboard", date ? { date } : {});
+    return this.enqueueManualSync("sync-scoreboard", date ? { date } : {});
   }
 
   @Post("sync/final-results")
@@ -65,7 +70,10 @@ export class NbaController {
     type: SyncJobResponseDto
   })
   async syncFinalResults(@Query("date") date?: string) {
-    return this.queue.add("sync-final-results", date ? { date } : {});
+    return this.enqueueManualSync(
+      "sync-final-results",
+      date ? { date } : {}
+    );
   }
 
   @Post("sync/player-game-stats")
@@ -83,7 +91,7 @@ export class NbaController {
     if (!date && !gameId) {
       throw new BadRequestException("date or gameId is required");
     }
-    return this.queue.add("sync-player-game-stats", { date, gameId });
+    return this.enqueueManualSync("sync-player-game-stats", { date, gameId });
   }
 
   @Post("sync/players")
@@ -97,7 +105,7 @@ export class NbaController {
     if (!season) {
       throw new BadRequestException("season is required, e.g. 2024-25");
     }
-    return this.queue.add("sync-players", { season });
+    return this.enqueueManualSync("sync-players", { season });
   }
 
   @Post("sync/player-season-teams")
@@ -111,7 +119,7 @@ export class NbaController {
     if (!season) {
       throw new BadRequestException("season is required, e.g. 2024-25");
     }
-    return this.queue.add("sync-player-season-teams", { season });
+    return this.enqueueManualSync("sync-player-season-teams", { season });
   }
 
   @Post("sync/injury-report")
@@ -121,7 +129,7 @@ export class NbaController {
     type: SyncJobResponseDto
   })
   async syncInjuryReport() {
-    return this.queue.add("sync-injury-report", {});
+    return this.enqueueManualSync("sync-injury-report", {});
   }
 
   @Post("sync/range")
@@ -130,8 +138,8 @@ export class NbaController {
   @ApiQuery({ name: "to", required: true, description: "YYYY-MM-DD" })
   @ApiQuery({ name: "mode", required: false, description: "scoreboard|final|player|both" })
   @ApiOkResponse({
-    description: "Range sync enqueued for each date in range.",
-    type: SyncRangeResponseDto
+    description: "Range sync enqueued (executed asynchronously via queue).",
+    type: SyncJobResponseDto
   })
   async syncRange(
     @Query("from") from?: string,
@@ -142,26 +150,20 @@ export class NbaController {
       throw new BadRequestException("from/to are required, e.g. 2026-02-01");
     }
 
+    const fromDate = this.parseDate(from);
+    const toDate = this.parseDate(to);
+    if (toDate.getTime() < fromDate.getTime()) {
+      throw new BadRequestException("to must be >= from");
+    }
     const maxDays = Number(process.env.NBA_SYNC_RANGE_MAX_DAYS || 0);
-    const dates = this.expandDates(from, to, maxDays);
-
-    const shouldScoreboard = mode !== "final";
-    const shouldFinal = mode !== "scoreboard";
-
-    const jobs: unknown[] = [];
-    for (const date of dates) {
-      if (shouldScoreboard) {
-        jobs.push(await this.queue.add("sync-scoreboard", { date }));
-      }
-      if (shouldFinal) {
-        jobs.push(await this.queue.add("sync-final-results", { date }));
-      }
+    const days =
+      Math.floor((toDate.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000)) +
+      1;
+    if (maxDays > 0 && days > maxDays) {
+      throw new BadRequestException(`range too large, max days = ${maxDays}`);
     }
 
-    return {
-      dates,
-      jobs: jobs.length
-    };
+    return this.enqueueManualSync("sync-range", { from, to, mode });
   }
 
   @Get("teams")
@@ -329,7 +331,7 @@ export class NbaController {
     description: "AI analysis result with win probabilities.",
     type: GameAnalysisResponseDto
   })
-  async analyzeGame(@Body() body: GameAnalysisRequestDto) {
+  async analyzeGame(@Req() req: Request, @Body() body: GameAnalysisRequestDto) {
     if (!body?.date) {
       throw new BadRequestException("date is required, YYYY-MM-DD");
     }
@@ -339,25 +341,83 @@ export class NbaController {
 
     this.parseDate(body.date);
 
-    const result = await this.nbaService.analyzeGameByMatchup(
-      {
-        date: body.date,
-        home: body.home,
-        away: body.away
-      },
-      {
-        matchupLimit:
-          body.matchupLimit !== undefined ? Number(body.matchupLimit) : undefined,
-        recentLimit:
-          body.recentLimit !== undefined ? Number(body.recentLimit) : undefined
+    const x402 = (req as any).x402 as
+      | { sessionId?: string; payerAddress?: string | null }
+      | undefined;
+    const requestParams = {
+      date: body.date,
+      home: body.home,
+      away: body.away,
+      matchupLimit:
+        body.matchupLimit !== undefined ? Number(body.matchupLimit) : undefined,
+      recentLimit:
+        body.recentLimit !== undefined ? Number(body.recentLimit) : undefined
+    };
+
+    let recorded = false;
+    const recordOnce = async (payload: {
+      payerAddress?: string | null;
+      sessionId?: string | null;
+      requestParams: Record<string, any>;
+      response?: Record<string, any> | null;
+      error?: string | null;
+    }) => {
+      if (recorded) {
+        return;
       }
-    );
+      recorded = true;
+      await this.nbaService.recordAnalysisLog(payload);
+    };
 
-    if (!result) {
-      throw new NotFoundException("game not found");
+    try {
+      const result = await this.nbaService.analyzeGameByMatchup(
+        {
+          date: body.date,
+          home: body.home,
+          away: body.away
+        },
+        {
+          matchupLimit:
+            body.matchupLimit !== undefined
+              ? Number(body.matchupLimit)
+              : undefined,
+          recentLimit:
+            body.recentLimit !== undefined ? Number(body.recentLimit) : undefined
+        }
+      );
+
+      if (!result) {
+        await recordOnce({
+          payerAddress: x402?.payerAddress ?? null,
+          sessionId: x402?.sessionId ?? null,
+          requestParams,
+          response: null,
+          error: "game_not_found"
+        });
+        throw new NotFoundException("game not found");
+      }
+
+      await recordOnce({
+        payerAddress: x402?.payerAddress ?? null,
+        sessionId: x402?.sessionId ?? null,
+        requestParams,
+        response: result as any,
+        error: null
+      });
+
+      return result;
+    } catch (err: any) {
+      // Best-effort: still record error, but don't change the thrown exception.
+      await recordOnce({
+        payerAddress: x402?.payerAddress ?? null,
+        sessionId: x402?.sessionId ?? null,
+        requestParams,
+        response: null,
+        error:
+          err?.message || (typeof err === "string" ? err : "analysis_failed")
+      });
+      throw err;
     }
-
-    return result;
   }
 
   @Get("players")
@@ -652,30 +712,50 @@ export class NbaController {
     return undefined;
   }
 
-  private expandDates(from: string, to: string, maxDays: number) {
-    const start = this.parseDate(from);
-    const end = this.parseDate(to);
+  private async enqueueManualSync(name: string, data: Record<string, any>) {
+    const redis = await this.queue.client;
+    const cooldownKey = `manual-sync:cooldown:${name}`;
+    const jobKey = `manual-sync:job:${name}`;
 
-    if (end.getTime() < start.getTime()) {
-      throw new BadRequestException("to must be >= from");
+    // Only allow one manual enqueue per endpoint within the cooldown window.
+    const claimed = await redis.set(
+      cooldownKey,
+      String(Date.now()),
+      "PX",
+      NbaController.MANUAL_SYNC_COOLDOWN_MS,
+      "NX"
+    );
+
+    if (claimed) {
+      const job = await this.queue.add(name, data);
+      await redis.set(
+        jobKey,
+        String(job.id),
+        "PX",
+        NbaController.MANUAL_SYNC_COOLDOWN_MS
+      );
+      return job;
     }
 
-    const dates: string[] = [];
-    const cursor = new Date(start);
-    let count = 0;
-
-    while (cursor.getTime() <= end.getTime()) {
-      dates.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-      count += 1;
-      if (maxDays > 0 && count > maxDays) {
-        throw new BadRequestException(
-          `range too large, max days = ${maxDays}`
-        );
+    // Cooldown active: return the existing job (if known) so callers can wait on it.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const existingJobId = await redis.get(jobKey);
+      if (existingJobId) {
+        const existing = await this.queue.getJob(existingJobId);
+        if (existing) {
+          return existing;
+        }
       }
+      // Small wait to allow the enqueuer to persist the job id (race window).
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    return dates;
+    // Fallback: no job id cached (race), return a useful error.
+    const retryAfterMs = await redis.pttl(cooldownKey);
+    throw new HttpException(
+      `manual sync cooldown active; retry after ${Math.max(0, retryAfterMs)}ms`,
+      HttpStatus.TOO_MANY_REQUESTS
+    );
   }
 
   private parseDate(value: string) {

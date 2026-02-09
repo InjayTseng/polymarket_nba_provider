@@ -38,12 +38,13 @@
 - 若要限制為 NBA：依 `nba-ingestion-guide.md` 建議，加入 `series_id` / `tag_id` 參數並採用專用 offset key。
 - 若要補齊 NBA 球員與賽程：依 `nba-api-sync.md` 指示執行對應的 `sync:*` 任務。
 - 需要手動跑 migration 時：`npm run migration:run`（於 `backend/` 內）
-- 手動同步 NBA scoreboard：`POST /nba/sync/scoreboard?date=YYYY-MM-DD`
-- 手動同步 NBA final results：`POST /nba/sync/final-results?date=YYYY-MM-DD`
-- 手動同步 players：`POST /nba/sync/players?season=2024-25`
-- 手動同步 player season teams：`POST /nba/sync/player-season-teams?season=2024-25`
+- 手動同步 NBA scoreboard：`POST /nba/sync/scoreboard?date=YYYY-MM-DD`（30 分鐘冷卻）
+- 手動同步 NBA final results：`POST /nba/sync/final-results?date=YYYY-MM-DD`（30 分鐘冷卻）
+- 手動同步 players：`POST /nba/sync/players?season=2024-25`（30 分鐘冷卻）
+- 手動同步 player season teams：`POST /nba/sync/player-season-teams?season=2024-25`（30 分鐘冷卻）
+- 手動同步時間區間（API）：`POST /nba/sync/range?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=both`（30 分鐘冷卻；佇列內會再拆成每日 jobs）
 - 同步時間區間（npm）：`cd backend && npm run nba:sync:range -- --from=2026-02-01 --to=2026-02-07 --mode=both`（`scoreboard` / `final` / `player` / `both`）
-- 手動同步 player game stats：`POST /nba/sync/player-game-stats?date=YYYY-MM-DD`（或 `gameId=...`）
+- 手動同步 player game stats：`POST /nba/sync/player-game-stats?date=YYYY-MM-DD`（或 `gameId=...`，30 分鐘冷卻）
 - 查詢：`GET /nba/teams`、`GET /nba/games?date=YYYY-MM-DD`、`GET /nba/players`、`GET /nba/team-stats`、`GET /nba/player-stats`、`GET /nba/conflicts`
   - 支援 `page`、`pageSize` 與部分篩選參數（如 `teamId`、`season`、`status`）
 - 比賽對應 Polymarket：`GET /nba/games/:id/markets`（嘗試以 slug/date 對應 event，回傳 event + markets）
@@ -52,8 +53,10 @@
 
 **排程與隊列**
 - 使用 BullMQ + Cron：
-  - scoreboard：預設每 10 分鐘
-  - final results：預設每 15 分鐘
+  - 今日對戰 scoreboard：預設每 10 分鐘
+  - 今日對戰 final results：預設每 10 分鐘
+  - 未來 7 天對戰：預設每小時更新（tomorrow..+6 days）
+  - stale scheduled：預設每 6 小時（從 DB 撈超過 24 小時仍 scheduled 的 game 來補同步）
 - Polymarket NBA 同步：
   - `POLYMARKET_NBA_SYNC_ENABLED`（預設 true）
   - `POLYMARKET_NBA_SYNC_CRON`（預設 */5 * * * *）

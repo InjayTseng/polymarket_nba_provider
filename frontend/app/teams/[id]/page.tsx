@@ -97,10 +97,10 @@ function renderTable(
 export default async function TeamPage({
   params
 }: {
-  params: { id: string };
-  searchParams?: SearchParams;
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParams>;
 }) {
-  const teamId = params.id;
+  const { id: teamId } = await params;
 
   const [team, players, recentGames, teams] = await Promise.all([
     fetchJson(`${serverApiBase}/nba/teams/${teamId}`),

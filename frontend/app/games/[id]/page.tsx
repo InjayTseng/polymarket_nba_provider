@@ -172,11 +172,12 @@ export default async function GameDetail({
   params,
   searchParams
 }: {
-  params: { id: string };
-  searchParams?: SearchParams;
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParams>;
 }) {
-  const gameId = params.id;
-  const dateParam = getParam(searchParams, "date");
+  const { id: gameId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const dateParam = getParam(resolvedSearchParams, "date");
 
   const [teams, game] = await Promise.all([
     fetchJson(`${serverApiBase}/nba/teams`),

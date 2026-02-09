@@ -12,6 +12,7 @@ import { PlayerSeasonTeam } from "./entities/player-season-team.entity";
 import { DataConflict } from "./entities/data-conflict.entity";
 import { InjuryReport } from "./entities/injury-report.entity";
 import { InjuryReportEntry } from "./entities/injury-report-entry.entity";
+import { NbaAnalysisLog } from "./entities/nba-analysis-log.entity";
 import { NbaSyncProcessor } from "./nba.sync.processor";
 import { NbaSyncScheduler } from "./nba.sync.scheduler";
 import { Event } from "../polymarket/entities/event.entity";
@@ -29,6 +30,7 @@ import { Market } from "../polymarket/entities/market.entity";
       DataConflict,
       InjuryReport,
       InjuryReportEntry,
+      NbaAnalysisLog,
       Event,
       Market
     ]),

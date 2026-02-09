@@ -3,13 +3,17 @@ import { ConfigService } from "@nestjs/config";
 import { Cron } from "@nestjs/schedule";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Game } from "./entities/game.entity";
 
 @Injectable()
 export class NbaSyncScheduler {
   private readonly logger = new Logger(NbaSyncScheduler.name);
   constructor(
     private readonly configService: ConfigService,
-    @InjectQueue("nba-sync") private readonly queue: Queue
+    @InjectQueue("nba-sync") private readonly queue: Queue,
+    @InjectRepository(Game) private readonly gameRepo: Repository<Game>
   ) {}
 
   private resolveDate(explicit?: string) {
@@ -39,6 +43,15 @@ export class NbaSyncScheduler {
       dates.push(current.toISOString().slice(0, 10));
     }
     return dates;
+  }
+
+  private addDays(date: string, offset: number) {
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      return date;
+    }
+    parsed.setUTCDate(parsed.getUTCDate() + offset);
+    return parsed.toISOString().slice(0, 10);
   }
 
   private formatToday() {
@@ -71,7 +84,7 @@ export class NbaSyncScheduler {
     );
   }
 
-  @Cron(process.env.NBA_FINAL_RESULTS_CRON || "*/15 * * * *")
+  @Cron(process.env.NBA_FINAL_RESULTS_CRON || "*/10 * * * *")
   async enqueueFinalResults() {
     const date = this.resolveDate(
       this.configService.get<string>("NBA_FINAL_RESULTS_DATE")
@@ -111,7 +124,7 @@ export class NbaSyncScheduler {
     );
   }
 
-  @Cron(process.env.NBA_UPCOMING_SCHEDULE_CRON || "20 0 * * *")
+  @Cron(process.env.NBA_UPCOMING_SCHEDULE_CRON || "0 * * * *")
   async enqueueUpcomingSchedule() {
     const enabled = this.configService.get<string>(
       "NBA_UPCOMING_SCHEDULE_ENABLED"
@@ -120,24 +133,76 @@ export class NbaSyncScheduler {
       return;
     }
 
-    const startDate = this.resolveDate(
-      this.configService.get<string>("NBA_UPCOMING_SCHEDULE_DATE")
+    const explicitStartDate = this.configService.get<string>(
+      "NBA_UPCOMING_SCHEDULE_DATE"
     );
+    // Default to "tomorrow" so this job covers future 7 days (not including today).
+    const startDate = explicitStartDate
+      ? explicitStartDate
+      : this.addDays(this.formatToday(), 1);
     const daysAhead = this.resolveDays(
       this.configService.get<string>("NBA_UPCOMING_SCHEDULE_DAYS"),
-      7
+      6
     );
     const dates = this.buildDateRange(startDate, daysAhead);
 
-    for (const date of dates) {
-      await this.queue.add("sync-scoreboard", { date }, {});
-      this.logger.log(
-        `[cron] enqueue sync-scoreboard (upcoming) date=${date} at ${new Date().toISOString()}`
-      );
+    const jobs = dates.map((date) => ({ name: "sync-scoreboard", data: { date } }));
+    if (jobs.length) {
+      await this.queue.addBulk(jobs as any);
     }
 
     this.logger.log(
       `[cron] enqueue upcoming schedule range ${dates[0]}..${dates[dates.length - 1]} count=${dates.length} at ${new Date().toISOString()}`
+    );
+  }
+
+  @Cron(process.env.NBA_STALE_SCHEDULED_CRON || "0 */6 * * *")
+  async enqueueStaleScheduledGames() {
+    const enabled = this.configService.get<string>("NBA_STALE_SCHEDULED_ENABLED");
+    if (enabled === "false") {
+      return;
+    }
+
+    const lookbackHoursRaw =
+      this.configService.get<string>("NBA_STALE_SCHEDULED_LOOKBACK_HOURS") || "24";
+    const lookbackHours = Math.max(1, Number.parseInt(lookbackHoursRaw, 10) || 24);
+    const maxGamesRaw =
+      this.configService.get<string>("NBA_STALE_SCHEDULED_MAX_GAMES") || "200";
+    const maxGames = Math.max(1, Number.parseInt(maxGamesRaw, 10) || 200);
+    const maxDatesRaw =
+      this.configService.get<string>("NBA_STALE_SCHEDULED_MAX_DATES") || "14";
+    const maxDates = Math.max(1, Number.parseInt(maxDatesRaw, 10) || 14);
+
+    const cutoff = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+    const staleGames = await this.gameRepo
+      .createQueryBuilder("game")
+      .select(["game.id", "game.status", "game.dateTimeUtc"])
+      .where("LOWER(game.status) = :status", { status: "scheduled" })
+      .andWhere("game.dateTimeUtc < :cutoff", { cutoff: cutoff.toISOString() })
+      .orderBy("game.dateTimeUtc", "DESC")
+      .limit(maxGames)
+      .getMany();
+
+    if (staleGames.length === 0) {
+      this.logger.log(
+        `[cron] stale scheduled games: none (cutoff=${cutoff.toISOString()})`
+      );
+      return;
+    }
+
+    const dates = Array.from(
+      new Set(staleGames.map((game) => game.dateTimeUtc.toISOString().slice(0, 10)))
+    ).slice(0, maxDates);
+
+    // Enqueue scoreboard first, then final results for each date so that status updates land first.
+    const jobs = dates.flatMap((date) => [
+      { name: "sync-scoreboard", data: { date } },
+      { name: "sync-final-results", data: { date } }
+    ]);
+    await this.queue.addBulk(jobs as any);
+
+    this.logger.warn(
+      `[cron] stale scheduled games: games=${staleGames.length} dates=${dates.length} cutoff=${cutoff.toISOString()}`
     );
   }
 }

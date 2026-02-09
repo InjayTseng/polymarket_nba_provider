@@ -7,9 +7,8 @@ import { injected } from "wagmi/connectors";
 import { baseSepolia } from "wagmi/chains";
 
 const connectors = [
-  injected({
-    target: "metaMask"
-  })
+  // Use the generic injected connector to avoid pulling in MetaMask SDK (and its React Native deps).
+  injected()
 ];
 
 const config = createConfig({

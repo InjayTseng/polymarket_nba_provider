@@ -53,10 +53,10 @@ function renderTable(
 export default async function PlayerPage({
   params
 }: {
-  params: { id: string };
-  searchParams?: SearchParams;
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParams>;
 }) {
-  const playerId = params.id;
+  const { id: playerId } = await params;
 
   const [player, playerStats, teams] = await Promise.all([
     fetchJson(`${serverApiBase}/nba/players/${playerId}`),

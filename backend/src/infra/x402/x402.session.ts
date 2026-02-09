@@ -21,6 +21,7 @@ const SESSION_TTL_MS =
 const SESSION_GC_INTERVAL_MS = 15 * 60 * 1000;
 
 const paidSessions = new Map<string, number>();
+const sessionPayers = new Map<string, { payerAddress: string; expiresAt: number }>();
 let gcStarted = false;
 
 function startGc() {
@@ -33,6 +34,12 @@ function startGc() {
     for (const [sessionId, expiresAt] of paidSessions.entries()) {
       if (expiresAt <= now) {
         paidSessions.delete(sessionId);
+        sessionPayers.delete(sessionId);
+      }
+    }
+    for (const [sessionId, payer] of sessionPayers.entries()) {
+      if (payer.expiresAt <= now) {
+        sessionPayers.delete(sessionId);
       }
     }
   }, SESSION_GC_INTERVAL_MS).unref();
@@ -70,6 +77,7 @@ export function isSessionPaid(sessionId: string) {
   }
   if (expiresAt <= Date.now()) {
     paidSessions.delete(sessionId);
+    sessionPayers.delete(sessionId);
     return false;
   }
   return true;
@@ -81,4 +89,32 @@ export function markSessionPaid(sessionId: string) {
   }
   const expiresAt = Date.now() + SESSION_TTL_MS;
   paidSessions.set(sessionId, expiresAt);
+  const payer = sessionPayers.get(sessionId);
+  if (payer) {
+    sessionPayers.set(sessionId, { payerAddress: payer.payerAddress, expiresAt });
+  }
+}
+
+export function setSessionPayer(sessionId: string, payerAddress: string) {
+  if (SESSION_DISABLED) {
+    return;
+  }
+  startGc();
+  const expiresAt = paidSessions.get(sessionId) ?? Date.now() + SESSION_TTL_MS;
+  sessionPayers.set(sessionId, { payerAddress, expiresAt });
+}
+
+export function getSessionPayer(sessionId: string): string | null {
+  if (SESSION_DISABLED) {
+    return null;
+  }
+  const entry = sessionPayers.get(sessionId);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    sessionPayers.delete(sessionId);
+    return null;
+  }
+  return entry.payerAddress;
 }

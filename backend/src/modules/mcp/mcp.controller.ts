@@ -1,8 +1,16 @@
 import { Body, Controller, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiExtraModels,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  getSchemaPath,
+} from "@nestjs/swagger";
 import { McpService } from "./mcp.service";
 import type { McpJsonRpcRequest, McpJsonRpcResponse } from "./mcp.types";
+import { McpJsonRpcRequestDto, McpJsonRpcResponseDto } from "./mcp.swagger";
 
 function ok(id: any, result: any): McpJsonRpcResponse {
   return { jsonrpc: "2.0", id, result };
@@ -14,11 +22,77 @@ function err(id: any, code: number, message: string, data?: any): McpJsonRpcResp
 
 @Controller("mcp")
 @ApiTags("MCP")
+@ApiExtraModels(McpJsonRpcRequestDto, McpJsonRpcResponseDto)
 export class McpController {
   constructor(private readonly mcpService: McpService) {}
 
   @Post()
   @ApiOperation({ summary: "MCP JSON-RPC endpoint" })
+  @ApiBody({
+    required: true,
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(McpJsonRpcRequestDto) },
+        { type: "array", items: { $ref: getSchemaPath(McpJsonRpcRequestDto) } },
+      ],
+    },
+    examples: {
+      initialize: {
+        summary: "initialize",
+        value: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {},
+        },
+      },
+      toolsList: {
+        summary: "tools/list",
+        value: {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/list",
+          params: {},
+        },
+      },
+      toolsCall: {
+        summary: "tools/call (nba.getGameContext)",
+        value: {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: "nba.getGameContext",
+            arguments: { date: "2026-02-09", home: "SAS", away: "DAL" },
+          },
+        },
+      },
+      batch: {
+        summary: "batch (initialize + tools/list)",
+        value: [
+          { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+          { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+        ],
+      },
+      notification: {
+        summary: "notification (no id, server returns 204)",
+        value: {
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {},
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: "JSON-RPC response object (or array of responses for batch requests).",
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(McpJsonRpcResponseDto) },
+        { type: "array", items: { $ref: getSchemaPath(McpJsonRpcResponseDto) } },
+      ],
+    },
+  })
   async handle(@Body() body: McpJsonRpcRequest | McpJsonRpcRequest[], @Res() res: Response) {
     const handleOne = async (req: McpJsonRpcRequest): Promise<McpJsonRpcResponse | null> => {
       const id = req?.id ?? null;

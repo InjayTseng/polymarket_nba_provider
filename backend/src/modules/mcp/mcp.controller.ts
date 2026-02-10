@@ -27,7 +27,15 @@ export class McpController {
   constructor(private readonly mcpService: McpService) {}
 
   @Post()
-  @ApiOperation({ summary: "MCP JSON-RPC endpoint" })
+  @ApiOperation({
+    summary: "MCP JSON-RPC endpoint",
+    description:
+      "Send JSON-RPC 2.0 in the request body. This endpoint supports single requests, batch requests (array), and notifications (omit id -> 204).\n\n" +
+      "Example: tools/list\n" +
+      '{ "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} }\n\n' +
+      "Example: tools/call\n" +
+      '{ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "ops.getFreshness", "arguments": {} } }'
+  })
   @ApiBody({
     required: true,
     schema: {
@@ -35,53 +43,14 @@ export class McpController {
         { $ref: getSchemaPath(McpJsonRpcRequestDto) },
         { type: "array", items: { $ref: getSchemaPath(McpJsonRpcRequestDto) } },
       ],
-    },
-    examples: {
-      initialize: {
-        summary: "initialize",
-        value: {
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {},
-        },
-      },
-      toolsList: {
-        summary: "tools/list",
-        value: {
-          jsonrpc: "2.0",
-          id: 2,
-          method: "tools/list",
-          params: {},
-        },
-      },
-      toolsCall: {
-        summary: "tools/call (nba.getGameContext)",
-        value: {
-          jsonrpc: "2.0",
-          id: 3,
-          method: "tools/call",
-          params: {
-            name: "nba.getGameContext",
-            arguments: { date: "2026-02-09", home: "SAS", away: "DAL" },
-          },
-        },
-      },
-      batch: {
-        summary: "batch (initialize + tools/list)",
-        value: [
-          { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
-          { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
-        ],
-      },
-      notification: {
-        summary: "notification (no id, server returns 204)",
-        value: {
-          jsonrpc: "2.0",
-          method: "notifications/initialized",
-          params: {},
-        },
-      },
+      // NOTE: nestjs/swagger v7 does not reliably render multiple request examples in Swagger UI.
+      // Provide a single example and keep additional samples in the description above.
+      example: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {}
+      }
     },
   })
   @ApiOkResponse({

@@ -36,28 +36,17 @@ async function mcpRpc(method: string, params?: any) {
   return { ok: res.ok, status: res.status, req: body, raw: text, json: parsed };
 }
 
-export function McpClient() {
+export function McpClient(props: { initialMatchup?: { date: string; home: string; away: string } }) {
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [selectedTool, setSelectedTool] = useState<string>("nba.getGameContext");
-  const todayEt = useMemo(() => {
-    const dtf = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    });
-    const parts = dtf.formatToParts(new Date());
-    const values: Record<string, string> = {};
-    for (const part of parts) {
-      if (part.type !== "literal") {
-        values[part.type] = part.value;
-      }
-    }
-    return `${values.year}-${values.month}-${values.day}`;
-  }, []);
-  const [argsText, setArgsText] = useState<string>(
-    prettyJson({ date: todayEt, home: "SAS", away: "DAL" })
+  const [argsText, setArgsText] = useState<string>(() =>
+    prettyJson(
+      props.initialMatchup
+        ? { ...props.initialMatchup }
+        : { date: "", home: "", away: "" }
+    )
   );
+  const [argsDirty, setArgsDirty] = useState(false);
 
   const [lastReq, setLastReq] = useState<any>(null);
   const [lastRes, setLastRes] = useState<any>(null);
@@ -65,6 +54,53 @@ export function McpClient() {
   const [loading, setLoading] = useState(false);
 
   const selected = useMemo(() => tools.find((t) => t.name === selectedTool) ?? null, [tools, selectedTool]);
+
+  const buildExampleArgs = (toolName: string) => {
+    const matchup = props.initialMatchup ?? { date: "", home: "", away: "" };
+    switch (toolName) {
+      case "nba.getGameContext":
+        return {
+          ...matchup,
+          matchupLimit: 5,
+          recentLimit: 5,
+          marketPage: 1,
+          marketPageSize: 10
+        };
+      case "analysis.nbaMatchup":
+        return { ...matchup, matchupLimit: 5, recentLimit: 5 };
+      case "pm.getPrices":
+        return { marketId: null, marketIds: [], tokenId: "", side: "buy" };
+      case "pm.getRecentTrades":
+        return { tokenId: "", limit: 50 };
+      case "alerts.detectLargeTrades":
+        return { tokenId: "", limit: 100, minNotionalUsd: 2500, minSize: 0 };
+      case "analysis.computeEdge":
+        return {
+          modelYesProb: 0.55,
+          marketYesPrice: 0.5,
+          marketNoPrice: 0.5,
+          kellyFractionCap: 0.25
+        };
+      case "ops.getFreshness":
+        return {};
+      default:
+        return {};
+    }
+  };
+
+  const setExampleForSelectedTool = () => {
+    setArgsText(prettyJson(buildExampleArgs(selectedTool)));
+    setArgsDirty(false);
+  };
+
+  const extractToolCallOutput = (json: any) => {
+    const content = json?.result?.content;
+    const text = Array.isArray(content) ? content?.[0]?.text : null;
+    if (typeof text === "string") {
+      return safeJsonParse(text) ?? text;
+    }
+    return json?.result ?? null;
+  };
 
   const doInit = async () => {
     setLoading(true);
@@ -80,6 +116,12 @@ export function McpClient() {
       setLoading(false);
     }
   };
+
+  // Always show a tool-appropriate example when switching tools.
+  useEffect(() => {
+    setExampleForSelectedTool();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTool]);
 
   const doList = async () => {
     setLoading(true);
@@ -98,6 +140,79 @@ export function McpClient() {
         if (toolList.length && !toolList.find((t: any) => t?.name === selectedTool)) {
           setSelectedTool(toolList[0].name);
         }
+      }
+    } catch (e: any) {
+      setError(e?.message || "failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fillFromMatchupMarkets = async (alsoCall: boolean) => {
+    const baseMatchup = (() => {
+      const current = safeJsonParse(argsText);
+      const date = current?.date ? String(current.date) : props.initialMatchup?.date;
+      const home = current?.home ? String(current.home) : props.initialMatchup?.home;
+      const away = current?.away ? String(current.away) : props.initialMatchup?.away;
+      return date && home && away ? { date, home, away } : null;
+    })();
+
+    if (!baseMatchup) {
+      setError("Missing date/home/away. Provide a matchup first.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const ctxOut = await mcpRpc("tools/call", {
+        name: "nba.getGameContext",
+        arguments: { ...baseMatchup, marketPage: 1, marketPageSize: 10 }
+      });
+      setLastReq(ctxOut.req);
+      setLastRes(ctxOut.json ?? ctxOut.raw);
+      if (!ctxOut.ok) {
+        setError(`HTTP ${ctxOut.status}`);
+        return;
+      }
+
+      const parsed = extractToolCallOutput(ctxOut.json);
+      const ctx = (parsed as any)?.context;
+      const markets = Array.isArray(ctx?.polymarket?.markets?.data)
+        ? ctx.polymarket.markets.data
+        : [];
+      const first = markets.find((m: any) => m?.polymarketMarketId || (Array.isArray(m?.clobTokenIds) && m.clobTokenIds.length));
+      if (!first) {
+        setError("No linked Polymarket markets found in context.");
+        return;
+      }
+
+      const marketIdRaw = first?.polymarketMarketId ?? null;
+      const marketId = marketIdRaw !== null ? Number(marketIdRaw) : null;
+      const tokenId = Array.isArray(first?.clobTokenIds) ? String(first.clobTokenIds[0] || "") : "";
+
+      let nextArgs: any = {};
+      if (selectedTool === "pm.getPrices") {
+        nextArgs = { marketId: Number.isFinite(marketId) ? marketId : null, side: "buy" };
+      } else if (selectedTool === "pm.getRecentTrades") {
+        nextArgs = { tokenId, limit: 50 };
+      } else if (selectedTool === "alerts.detectLargeTrades") {
+        nextArgs = { tokenId, limit: 100, minNotionalUsd: 2500, minSize: 0 };
+      } else {
+        nextArgs = { ...baseMatchup };
+      }
+
+      setArgsText(prettyJson(nextArgs));
+      setArgsDirty(false);
+
+      if (alsoCall) {
+        const callOut = await mcpRpc("tools/call", {
+          name: selectedTool,
+          arguments: nextArgs
+        });
+        setLastReq(callOut.req);
+        setLastRes(callOut.json ?? callOut.raw);
+        if (!callOut.ok) setError(`HTTP ${callOut.status}`);
       }
     } catch (e: any) {
       setError(e?.message || "failed");
@@ -155,7 +270,15 @@ export function McpClient() {
             <label className="field" style={{ minWidth: 280 }}>
               <span>Tool</span>
               <select value={selectedTool} onChange={(e) => setSelectedTool(e.target.value)}>
-                {(tools.length ? tools : [{ name: "nba.getGameContext" }, { name: "pm.getPrices" }, { name: "analysis.nbaMatchup" }, { name: "analysis.computeEdge" }, { name: "pm.getRecentTrades" }, { name: "ops.getFreshness" }]).map((t: any) => (
+                {(tools.length ? tools : [
+                  { name: "nba.getGameContext" },
+                  { name: "pm.getPrices" },
+                  { name: "analysis.nbaMatchup" },
+                  { name: "analysis.computeEdge" },
+                  { name: "pm.getRecentTrades" },
+                  { name: "alerts.detectLargeTrades" },
+                  { name: "ops.getFreshness" }
+                ]).map((t: any) => (
                   <option key={t.name} value={t.name}>
                     {t.name}
                   </option>
@@ -164,12 +287,42 @@ export function McpClient() {
             </label>
           </div>
 
+          <div className="form-row">
+            <button type="button" onClick={setExampleForSelectedTool} disabled={loading} className="ghost">
+              example
+            </button>
+            {(selectedTool === "pm.getPrices" ||
+              selectedTool === "pm.getRecentTrades" ||
+              selectedTool === "alerts.detectLargeTrades") ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void fillFromMatchupMarkets(false)}
+                  disabled={loading}
+                  className="ghost"
+                >
+                  fill from matchup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void fillFromMatchupMarkets(true)}
+                  disabled={loading}
+                >
+                  fill + call
+                </button>
+              </>
+            ) : null}
+          </div>
+
           <label className="field" style={{ width: "100%" }}>
             <span>Arguments (JSON)</span>
             <textarea
               className="codearea"
               value={argsText}
-              onChange={(e) => setArgsText(e.target.value)}
+              onChange={(e) => {
+                setArgsText(e.target.value);
+                setArgsDirty(true);
+              }}
               rows={10}
               spellCheck={false}
             />

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { A2AClient } from "./ui";
+import { resolveDefaultMatchupEt } from "../_lib/default-matchup";
 
-export default function A2APage() {
+export default async function A2APage() {
+  const defaults = await resolveDefaultMatchupEt({ daysAheadStart: 1, daysAheadMax: 7 });
   return (
     <main>
       <div className="badge">A2A</div>
@@ -25,9 +27,8 @@ export default function A2APage() {
       </section>
 
       <section className="console">
-        <A2AClient />
+        <A2AClient initialMatchup={defaults ?? undefined} />
       </section>
     </main>
   );
 }
-

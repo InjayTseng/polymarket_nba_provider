@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { McpClient } from "./ui";
+import { resolveDefaultMatchupEt } from "../_lib/default-matchup";
 
-export default function McpPage() {
+export default async function McpPage() {
+  const defaults = await resolveDefaultMatchupEt({ daysAheadStart: 1, daysAheadMax: 7 });
   return (
     <main>
       <div className="badge">MCP</div>
@@ -25,9 +27,8 @@ export default function McpPage() {
       </section>
 
       <section className="console">
-        <McpClient />
+        <McpClient initialMatchup={defaults ?? undefined} />
       </section>
     </main>
   );
 }
-

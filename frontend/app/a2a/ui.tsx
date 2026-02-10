@@ -42,6 +42,19 @@ function isoToday() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function addDaysDateString(dateYYYYMMDD: string, offsetDays: number) {
+  const parsed = new Date(`${dateYYYYMMDD}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateYYYYMMDD;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + offsetDays);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function isoTomorrowEt() {
+  return addDaysDateString(isoToday(), 1);
+}
+
 function useEventLog(limit = 250) {
   const [events, setEvents] = useState<Array<{ ts: string; event: string; data: any }>>([]);
   const push = (event: string, data: any) => {
@@ -55,11 +68,11 @@ function useEventLog(limit = 250) {
   return { events, push, clear };
 }
 
-export function A2AClient() {
+export function A2AClient(props: { initialMatchup?: { date: string; home: string; away: string } }) {
   const [capability, setCapability] = useState<Capability>("nba.matchup_brief");
-  const [date, setDate] = useState(isoToday());
-  const [home, setHome] = useState("SAS");
-  const [away, setAway] = useState("DAL");
+  const [date, setDate] = useState(props.initialMatchup?.date ?? isoTomorrowEt());
+  const [home, setHome] = useState(props.initialMatchup?.home ?? "");
+  const [away, setAway] = useState(props.initialMatchup?.away ?? "");
   const [matchupLimit, setMatchupLimit] = useState("5");
   const [recentLimit, setRecentLimit] = useState("5");
   const [marketId, setMarketId] = useState("");

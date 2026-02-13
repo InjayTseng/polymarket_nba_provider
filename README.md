@@ -160,7 +160,7 @@ On-chain verifiable agent identity for trust and discoverability.
 
 **Registered on Base Mainnet:** [View on 8004scan](https://www.8004scan.io/agents/base/14352)
 
-[![8004scan Agent Profile](https://www.8004scan.io/og/agents/base/14352.png)](https://www.8004scan.io/agents/base/14352)
+[![8004scan Agent Profile](https://blob.8004scan.app/c59dea7db664b53cf144769e0b0f0442fa9845f0d765af3241c5ef0c8548119d.jpg)](https://www.8004scan.io/agents/base/14352)
 
 ```json
 {

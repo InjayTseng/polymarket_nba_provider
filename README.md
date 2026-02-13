@@ -1,220 +1,440 @@
-# Polymarket NBA Provider
+# NBA Sports Intelligence Agent
 
-這個專案把 **NBA 官方資料** 與 **Polymarket NBA 市場** 同步到本地 PostgreSQL，提供 API 與前端介面，讓你能快速查賽程、比分、球員數據、傷兵報告，以及對應的 Polymarket 市場與即時價量。
+> **SF Agentic Commerce x402 Hackathon Submission**
+>
+> An autonomous AI agent that provides real-time NBA analytics, Polymarket predictions, and AI-powered betting insights — with native x402 micropayments for agent-to-agent commerce.
 
-**你會得到什麼**
-- 自動排程：定期同步 NBA 賽程/比分/球員數據與傷兵報告。
-- Polymarket NBA 事件/市場資料落地與查詢。
-- 可視化 UI：每日賽程、單場細節、球隊頁、球員頁。
-- 內建 API 文件：Swagger `/docs`。
+```
+Built with: A2A Protocol | x402 Payments | MCP Tools | ERC-8004 Identity
+```
 
-**核心元件**
-| Service | 技術 | 預設埠 | 作用 |
-| --- | --- | --- | --- |
-| `backend` | NestJS + TypeORM + BullMQ | `3000` | 主 API、排程、資料寫入 DB |
-| `frontend` | Next.js (App Router) | `3001` | UI (每日賽程、球隊/球員/比賽頁) |
-| `nba_service` | FastAPI + `nba_api` | `8000` | NBA Stats API 代理與資料整形 |
-| `db` | PostgreSQL 15 | `5432` | 資料落地 |
-| `redis` | Redis 7 | `6379` | BullMQ queue |
+---
 
-**資料來源**
-- Polymarket Gamma API：NBA 事件/市場。
-- Polymarket CLOB：即時價格與 orderbook。
-- NBA Stats API：賽程、比分、球隊、球員、Boxscore。
-- NBA 官方傷兵報告 PDF：由 `nba_service` 擷取。
+## The Problem
 
-**資料流概念**
-- NBA 同步：`backend` 透過 `nba_service` 拉 NBA API，寫入 `team` / `game` / `player` / `player_game_stat` / `team_game_stat` / `injury_report`。
-- Polymarket 同步：`backend` 透過 Gamma API 抓 NBA events/markets，寫入 `events` / `markets` / `tags` / `event_tags`。
-- UI 查詢：`frontend` 直接呼叫 `backend` API 顯示每日賽程、比賽與市場資訊。
+AI agents need real-time sports data to make informed predictions, but:
+- Data access is fragmented across multiple APIs
+- No standardized way for agents to discover and pay for sports intelligence
+- Prediction markets like Polymarket lack contextualized analysis
+- No verifiable agent identity for trustworthy data providers
 
-**架構圖（Mermaid）**
+## Our Solution
+
+**NBA Sports Intelligence Agent** is a fully autonomous agent that:
+
+1. **Aggregates** real-time NBA data (schedules, scores, player stats, injury reports)
+2. **Analyzes** Polymarket NBA betting markets with live prices
+3. **Provides** AI-powered matchup analysis and edge computation
+4. **Monetizes** through x402 micropayments — other agents can autonomously pay for premium insights
+
 ```mermaid
 flowchart LR
-  subgraph External["External APIs"]
-    NBAStats["NBA Stats API"]
-    InjuryPDF["NBA Injury Report PDF"]
-    Gamma["Polymarket Gamma API"]
-    CLOB["Polymarket CLOB"]
-  end
+    subgraph "External Data Sources"
+        NBA["NBA Stats API"]
+        PM["Polymarket API"]
+        INJ["Injury Reports"]
+    end
 
-  subgraph Core["Services"]
-    Frontend["frontend (Next.js)"]
-    Backend["backend (NestJS)"]
-    NbaService["nba_service (FastAPI)"]
-    Redis["redis (BullMQ queue)"]
-    DB[("PostgreSQL")]
-  end
+    subgraph "NBA Sports Agent"
+        A2A["A2A Endpoint"]
+        MCP["MCP Tools"]
+        X402["x402 Paywall"]
+        AI["AI Analysis Engine"]
+    end
 
-  Frontend -->|REST| Backend
-  Backend --> DB
-  Backend <--> Redis
-  Backend -->|REST| NbaService
-  NbaService --> NBAStats
-  NbaService --> InjuryPDF
-  Backend --> Gamma
-  Backend --> CLOB
+    subgraph "Consuming Agents"
+        AGENT1["Trading Agent"]
+        AGENT2["Research Agent"]
+        AGENT3["Portfolio Agent"]
+    end
+
+    NBA --> A2A
+    PM --> A2A
+    INJ --> A2A
+    A2A --> X402
+    X402 --> MCP
+    MCP --> AI
+    AI --> AGENT1
+    AI --> AGENT2
+    AI --> AGENT3
 ```
 
-**資料表關係圖（Mermaid ERD）**
+---
+
+## Agentic Commerce Features
+
+### 1. A2A Protocol (Agent-to-Agent)
+
+Fully compliant A2A implementation enabling autonomous agent discovery and task execution.
+
+```bash
+# Discover agent capabilities
+curl -s https://api-hoobs.polyox.io/.well-known/agent-card.json | jq
+
+# Create a task (JSON-RPC)
+curl -sX POST https://api-hoobs.polyox.io/a2a/rpc \
+  -H 'content-type: application/json' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tasks.create",
+    "params": {
+      "capability": "nba.matchup_brief",
+      "input": { "date": "2026-02-13", "home": "LAL", "away": "BOS" }
+    }
+  }'
+```
+
+**Supported A2A Methods:**
+| Method | Description |
+|--------|-------------|
+| `agent.getCard` | Discover capabilities and endpoints |
+| `tasks.create` | Create analysis task |
+| `tasks.get` | Poll task status |
+| `tasks.events` | SSE streaming for real-time updates |
+| `tasks.cancel` | Cancel running task |
+
+### 2. x402 Native Payments
+
+Seamless micropayments for premium AI analysis — agents can autonomously pay without human intervention.
+
+```
+HTTP/1.1 402 Payment Required
+payment-required: {"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:84532","amount":"1000","payTo":"0x..."}]}
+```
+
+**Payment Flow:**
+```mermaid
+sequenceDiagram
+    participant Agent as Consuming Agent
+    participant NBA as NBA Sports Agent
+    participant X402 as x402 Facilitator
+    participant Chain as Base Network
+
+    Agent->>NBA: POST /a2a/tasks?capability=nba.matchup_full
+    NBA->>Agent: 402 Payment Required
+    Agent->>X402: Verify payment requirements
+    Agent->>Chain: Execute USDC transfer
+    Chain->>X402: Confirm transaction
+    X402->>Agent: Payment signature
+    Agent->>NBA: Retry with payment proof
+    NBA->>Agent: 200 OK + AI Analysis
+```
+
+**Pricing:**
+| Capability | Price | Description |
+|-----------|-------|-------------|
+| `nba.matchup_brief` | Free | Quick game overview |
+| `nba.matchup_full` | $0.05 USDC | Full AI analysis with model outputs |
+| `/nba/analysis` | $0.001 USDC | Single game AI breakdown |
+
+### 3. MCP Tools Interface
+
+Standard MCP (Model Context Protocol) for LLM tool-use integration.
+
+```bash
+# List available tools
+curl -sX POST https://api-hoobs.polyox.io/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+**Available Tools:**
+| Tool | Description |
+|------|-------------|
+| `nba.getGameContext` | Get comprehensive game context |
+| `pm.getPrices` | Fetch Polymarket live prices |
+| `analysis.nbaMatchup` | AI-powered matchup analysis |
+| `analysis.computeEdge` | Calculate betting edge |
+| `pm.getRecentTrades` | Recent market activity |
+| `alerts.detectLargeTrades` | Whale movement alerts |
+| `ops.getFreshness` | Data freshness check |
+
+### 4. ERC-8004 Agent Identity (Planned)
+
+On-chain verifiable agent identity for trust and discoverability.
+
+```json
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "NBA Sports Intelligence Agent",
+  "description": "Real-time NBA analytics and Polymarket insights with x402 payments",
+  "services": [
+    {"name": "A2A", "endpoint": "https://api-hoobs.polyox.io/.well-known/agent-card.json"},
+    {"name": "MCP", "endpoint": "https://api-hoobs.polyox.io/mcp"},
+    {"name": "web", "endpoint": "https://app-hoobs.polyox.io"}
+  ],
+  "x402support": true,
+  "capabilities": ["nba.matchup_brief", "nba.matchup_full"]
+}
+```
+
+---
+
+## Technical Architecture
+
+### System Overview
+
+```mermaid
+flowchart TB
+    subgraph External["External APIs"]
+        NBAStats["NBA Stats API"]
+        InjuryPDF["NBA Injury Report PDF"]
+        Gamma["Polymarket Gamma API"]
+        CLOB["Polymarket CLOB"]
+    end
+
+    subgraph Core["Core Services"]
+        Frontend["Frontend<br/>(Next.js)"]
+        Backend["Backend<br/>(NestJS)"]
+        NbaService["NBA Service<br/>(FastAPI)"]
+        Redis["Redis<br/>(BullMQ)"]
+        DB[("PostgreSQL")]
+    end
+
+    subgraph Interfaces["Agent Interfaces"]
+        A2A["A2A Endpoint<br/>/.well-known/agent-card.json"]
+        MCP["MCP Endpoint<br/>/mcp"]
+        X402["x402 Middleware"]
+    end
+
+    Frontend -->|REST| Backend
+    Backend --> DB
+    Backend <--> Redis
+    Backend -->|REST| NbaService
+    NbaService --> NBAStats
+    NbaService --> InjuryPDF
+    Backend --> Gamma
+    Backend --> CLOB
+
+    A2A --> X402
+    MCP --> X402
+    X402 --> Backend
+```
+
+### Data Model
+
 ```mermaid
 erDiagram
-  TEAM ||--o{ GAME : home_team
-  TEAM ||--o{ GAME : away_team
-  GAME ||--o{ TEAM_GAME_STAT : has
-  TEAM ||--o{ TEAM_GAME_STAT : has
-  GAME ||--o{ PLAYER_GAME_STAT : has
-  PLAYER ||--o{ PLAYER_GAME_STAT : logs
-  TEAM ||--o{ PLAYER_GAME_STAT : plays_for
-  PLAYER ||--o{ PLAYER_SEASON_TEAM : seasons
-  TEAM ||--o{ PLAYER_SEASON_TEAM : seasons
-  INJURY_REPORT ||--o{ INJURY_REPORT_ENTRY : has
-  TEAM ||--o{ INJURY_REPORT_ENTRY : affects
-  PLAYER ||--o{ INJURY_REPORT_ENTRY : affects
-  EVENT ||--o{ MARKET : contains
-  MARKET ||--o{ MARKET_SNAPSHOT : snapshots
-  EVENT ||--o{ EVENT_TAG : tagged
-  TAG ||--o{ EVENT_TAG : tagged
-  EVENT ||--o{ GAME : linked
+    TEAM ||--o{ GAME : home_away
+    GAME ||--o{ PLAYER_GAME_STAT : has
+    PLAYER ||--o{ PLAYER_GAME_STAT : logs
+    EVENT ||--o{ MARKET : contains
+    MARKET ||--o{ MARKET_SNAPSHOT : snapshots
+    EVENT ||--o| GAME : linked
+    INJURY_REPORT ||--o{ INJURY_REPORT_ENTRY : has
 ```
 
-**快速啟動（Docker）**
-1. 啟動所有服務。
+### Service Stack
+
+| Service | Technology | Port | Purpose |
+|---------|-----------|------|---------|
+| `backend` | NestJS + TypeORM + BullMQ | 3000 | Main API, scheduling, x402 |
+| `frontend` | Next.js (App Router) | 3001 | UI + A2A/MCP consoles |
+| `nba_service` | FastAPI + nba_api | 8000 | NBA Stats proxy |
+| `db` | PostgreSQL 15 | 5432 | Data persistence |
+| `redis` | Redis 7 | 6379 | Job queue |
+
+---
+
+## Quick Start
+
+### Docker (Recommended)
+
 ```bash
+# Clone the repository
+git clone https://github.com/LINWANHAW/polymarket_nba_provider.git
+cd polymarket_nba_provider
+
+# Start all services
 docker compose up --build
+
+# Verify services
+curl http://localhost:3000/health  # Backend
+curl http://localhost:8000/health  # NBA Service
+open http://localhost:3001          # Frontend
 ```
-2. 確認服務。
-- `http://localhost:3000/health`（Backend）
-- `http://localhost:3001`（Frontend）
-- `http://localhost:8000/health`（NBA service）
-- Swagger: `http://localhost:3000/docs`（prod 預設關閉；需設 `SWAGGER_ENABLED=true`）
 
-Backend 容器啟動前會先執行 DB migration（見 `backend/docker-entrypoint.sh`）。
+### Environment Variables
 
-**常用 API（Backend）**
-NBA 查詢：
-- 注意：所有 `YYYY-MM-DD` 的 `date/from/to` 預設以美東時間（`America/New_York`, ET）的「比賽日」解讀（可用 `NBA_DATE_INPUT_TZ` 覆寫）。
-- `GET /nba/teams`
-- `GET /nba/games?date=YYYY-MM-DD`
-- `GET /nba/players?search=&teamId=&season=`
-- `GET /nba/team-stats`、`GET /nba/team-game-stat`
-- `GET /nba/player-stats`、`GET /nba/player-game-stat`
-- `GET /nba/injury-reports`、`GET /nba/injury-reports/entries`
-- `GET /nba/games/:id/markets`（比賽對應 Polymarket 市場）
-- `GET /nba/games/context?date=YYYY-MM-DD&home=AAA&away=BBB`（整合比賽/球隊/球員/近期戰績/傷兵/市場）
-- `POST /nba/analysis`（AI 賽局分析，需要 x402 付費；使用 `date+home+away`）
-
-Polymarket 查詢：
-- `GET /polymarket/events`、`GET /polymarket/markets`
-- `GET /polymarket/price?marketIds=...`（CLOB live price）
-- `GET /polymarket/orderbook?marketIds=...`
-
-x402 / A2A Agent：
-- `GET /.well-known/agent-card.json`（能力宣告與入口）
-- `POST /a2a/rpc`（JSON-RPC shim；支援 `agent.getCard`, `tasks.create/get/events/cancel`，付費能力建議用 REST）
-- `POST /a2a/tasks?capability=nba.matchup_brief`（免費；body 放 `input` 或直接放參數）
-- `POST /a2a/tasks?capability=nba.matchup_full`（x402 付費）
-- `GET /a2a/tasks/:id`（查狀態/結果）
-- `GET /a2a/tasks/:id/events`（SSE 串流）
-- `POST /a2a/tasks/:id/cancel`（取消，best-effort）
-
-MCP Server（HTTP JSON-RPC）：
-- `POST /mcp`
-  - `initialize`
-  - `tools/list`
-  - `tools/call`（工具：`nba.getGameContext`, `pm.getPrices`, `analysis.nbaMatchup`, `analysis.computeEdge`, `pm.getRecentTrades`, `alerts.detectLargeTrades`, `ops.getFreshness`）
-
-x402 付費端點：
-- `POST /nba/analysis`（每次支付後可呼叫 AI 分析；使用 `date+home+away`）
-
-**NBA Service API（FastAPI）**
-- 注意：`date=YYYY-MM-DD` 預設以美東時間（ET）的比賽日傳入（與 NBA 官方 `GAME_DATE_EST` 一致）。
-- `GET /scoreboard?date=YYYY-MM-DD`
-- `GET /schedule?date=YYYY-MM-DD` 或 `GET /schedule?from=YYYY-MM-DD&to=YYYY-MM-DD`
-- `GET /boxscore/traditional?game_id=...`
-- `GET /boxscore/advanced?game_id=...`
-- `GET /players/all?season=2024-25&current_only=false`
-- `GET /players/info?player_id=...`
-- `GET /teams/roster?team_id=...&season=2024-25`
-- `GET /injury-report/latest`
-
-**手動同步（Backend）**
-HTTP 觸發：
-- 注意：`date/from/to` 一律以美東時間（ET）的比賽日傳入。
-- `POST /nba/sync/scoreboard?date=YYYY-MM-DD`
-- `POST /nba/sync/final-results?date=YYYY-MM-DD`
-- `POST /nba/sync/players?season=2024-25`
-- `POST /nba/sync/player-season-teams?season=2024-25`
-- `POST /nba/sync/player-game-stats?date=YYYY-MM-DD` 或 `?gameId=...`
-- `POST /nba/sync/range?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=both`
-- `POST /nba/sync/injury-report`
-
-腳本（Node）：
 ```bash
-cd backend
-npm run nba:sync:range -- --from=2026-02-01 --to=2026-02-07 --mode=both
-npm run nba:sync:injury-report
-npm run polymarket:sync
+# x402 Payment Configuration (Base Sepolia testnet)
+X402_ENABLED=true
+X402_PAY_TO=0x...                    # Your USDC recipient address
+X402_NETWORK=eip155:84532            # Base Sepolia
+X402_PRICE=$0.001
+CDP_API_KEY_ID=...                   # Coinbase Developer Platform
+CDP_API_KEY_SECRET=...
+
+# AI Analysis
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+
+# Data Sources
+DATABASE_URL=postgresql://postgres:postgres@db:5432/polymarket_nba
+NBA_SERVICE_BASE=http://nba_service:8000
+POLYMARKET_BASE=https://gamma-api.polymarket.com
 ```
 
-**排程與隊列（預設）**
-- NBA scoreboard：`*/10 * * * *`
-- NBA final results：`*/15 * * * *`
-- NBA injury report：`30 * * * *`
-- Polymarket NBA 同步：`0 * * * *`（每小時）
-  - 條件 A：`active = true` 且 `end_date > now`
-  - 條件 B：`start_date` 落在「今天～未來 7 天」
+---
 
-可透過環境變數覆寫，例如：
-- `NBA_SCOREBOARD_CRON`、`NBA_FINAL_RESULTS_CRON`、`NBA_INJURY_REPORT_CRON`
-- `POLYMARKET_NBA_SYNC_ENABLED`、`POLYMARKET_NBA_SYNC_CRON`
-- `POLYMARKET_NBA_ACTIVE`、`POLYMARKET_NBA_CLOSED`
-- `POLYMARKET_NBA_PAGE_SIZE`、`POLYMARKET_NBA_MAX_PAGES`
-- `POLYMARKET_NBA_LOOKBACK_DAYS`
-- `POLYMARKET_NBA_LOOKAHEAD_DAYS`（預設 0）
-- `POLYMARKET_NBA_UPCOMING_DAYS`（預設 7）
-- `NBA_FINAL_LOOKBACK_DAYS`、`NBA_SYNC_RANGE_MAX_DAYS`
+## Use Cases
 
-**主要環境變數（Docker Compose 預設）**
-- `DATABASE_URL=postgresql://postgres:postgres@db:5432/polymarket_nba`
-- `NBA_SERVICE_BASE=http://nba_service:8000`
-- `POLYMARKET_BASE=https://gamma-api.polymarket.com`
-- `POLYMARKET_CLOB_BASE=https://clob.polymarket.com`
-- `REDIS_HOST=redis`、`REDIS_PORT=6379`
-- `NBA_INJURY_REPORT_INDEX_URL=https://official.nba.com/nba-injury-report-2020-21-season/`
+### 1. Trading Agent Integration
 
-**x402 付費設定（Base Sepolia testnet 預設）**
-- `X402_ENABLED=true` 開啟 x402 paywall（預設 `false`）。
-- `X402_PAY_TO=0x...` 收款地址（Base 鏈上的 USDC）。
-- `CDP_API_KEY_ID=...`
-- `CDP_API_KEY_SECRET=...`
-- `X402_FACILITATOR_URL=...`（預設 `https://www.x402.org/facilitator`）
-- `X402_NETWORK=eip155:84532`（Base Sepolia CAIP-2 network id）
-- `X402_PRICE=$0.001`
-- `X402_ANALYSIS_PRICE=$0.001`（可獨立設定 AI 分析價格）
-- `X402_ANALYSIS_DESCRIPTION=NBA AI analysis access`
-- `X402_SESSION_MODE=per_request`（每次呼叫都要付款；`disabled` 同義）
-- `X402_SESSION_TTL_MS=43200000`（session 解鎖在 server memory 的保留時間）
-- `X402_SESSION_COOKIE_NAME=x402_session`
-- `CORS_ORIGIN=http://localhost:3001`（需允許 frontend 帶 cookie 的跨域請求）
+A trading agent can autonomously:
+1. Discover this agent via A2A
+2. Request matchup analysis
+3. Pay via x402 micropayment
+4. Execute trades based on insights
 
-**OpenAI 設定（AI 賽局分析）**
-- `OPENAI_API_KEY=...`
-- `OPENAI_MODEL=gpt-4o-mini`
-- `OPENAI_TEMPERATURE=0.2`
-- `OPENAI_MAX_OUTPUT_TOKENS=700`
+```python
+# Example: Trading agent workflow
+async def get_betting_edge(game_date, home_team, away_team):
+    # 1. Create analysis task
+    task = await a2a_client.create_task(
+        capability="nba.matchup_full",
+        input={"date": game_date, "home": home_team, "away": away_team}
+    )
 
-**x402 行為說明**
-- 以 cookie session 判斷「每個 session 一次」，成功付費後同一 session 不再要求付款。
-- 目前是 backend memory 保存 session 狀態；重啟 backend 或多實例時會失效，正式環境建議改用 Redis。
+    # 2. x402 payment handled automatically by client
 
-**Repo 結構**
-- `backend/`：NestJS API、DB migration、NBA/Polymarket 同步邏輯。
-- `frontend/`：Next.js UI（每日賽程、球隊/球員/比賽細節）。
-- `nba-service/`：FastAPI + `nba_api` 的 NBA Stats proxy 與傷兵報告解析。
-- `docker-compose.yml`：一鍵啟動所有服務。
+    # 3. Get results
+    result = await a2a_client.get_task(task.id)
+    return result.output
+```
 
-**深入文件**
-- `nba-ingestion-guide.md`：Polymarket NBA 同步策略與參數建議。
-- `nba-api-sync.md`：NBA API 同步流程與 DB entity 對照。
-- `a2a-mcp-guide.md`：A2A 與 MCP 的使用流程、範例與注意事項。
+### 2. Research Agent Workflow
+
+```mermaid
+sequenceDiagram
+    participant R as Research Agent
+    participant N as NBA Sports Agent
+    participant A as Analysis Agent
+    participant T as Trading Agent
+
+    R->>N: Get game context (free)
+    N->>R: Game data + injury report
+    R->>N: Request full analysis (x402 paid)
+    N->>R: AI matchup analysis
+    R->>A: Forward for edge computation
+    A->>T: Trading signal
+    T->>T: Execute on Polymarket
+```
+
+### 3. MCP Tool Use (Claude/GPT)
+
+```bash
+# Claude Code can use this as an MCP server
+{
+  "mcpServers": {
+    "nba-sports": {
+      "url": "https://api-hoobs.polyox.io/mcp"
+    }
+  }
+}
+```
+
+---
+
+## Demo
+
+### Live Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| **API** | https://api-hoobs.polyox.io |
+| **App** | https://app-hoobs.polyox.io |
+| **Agent Card** | https://api-hoobs.polyox.io/.well-known/agent-card.json |
+| **A2A Console** | https://app-hoobs.polyox.io/a2a |
+| **MCP Console** | https://app-hoobs.polyox.io/mcp |
+
+### Quick Test Commands
+
+```bash
+# 1. Check agent capabilities
+curl -s https://api-hoobs.polyox.io/.well-known/agent-card.json | jq '.capabilities'
+
+# 2. Create a free task
+curl -sX POST 'https://api-hoobs.polyox.io/a2a/tasks?capability=nba.matchup_brief' \
+  -H 'content-type: application/json' \
+  -d '{"input":{"date":"2026-02-13","home":"LAL","away":"BOS"}}'
+
+# 3. List MCP tools
+curl -sX POST https://api-hoobs.polyox.io/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# 4. Get game context via MCP
+curl -sX POST https://api-hoobs.polyox.io/mcp \
+  -H 'content-type: application/json' \
+  -d '{
+    "jsonrpc":"2.0","id":2,"method":"tools/call",
+    "params":{"name":"nba.getGameContext","arguments":{"date":"2026-02-13","home":"LAL","away":"BOS"}}
+  }'
+```
+
+---
+
+## Hackathon Alignment
+
+### Technology Stack Match
+
+| Hackathon Requirement | Our Implementation |
+|----------------------|-------------------|
+| **x402 Payments** | Native x402 middleware with Coinbase facilitator |
+| **A2A Protocol** | Full A2A JSON-RPC + REST implementation |
+| **ERC-8004** | Agent identity ready (registration pending) |
+| **Agents/AI** | GPT-4o powered matchup analysis |
+| **Real-world utility** | Live NBA data + Polymarket integration |
+
+### Judging Criteria Alignment
+
+- **Innovation**: First sports intelligence agent with native x402 payments
+- **Technical Implementation**: Production-ready multi-service architecture
+- **x402 Integration**: Seamless micropayments for premium insights
+- **Real-world Applicability**: Live data, live markets, actionable insights
+- **Agent Interoperability**: A2A + MCP for maximum compatibility
+
+---
+
+## Roadmap
+
+- [x] Core NBA data ingestion
+- [x] Polymarket market integration
+- [x] A2A protocol implementation
+- [x] x402 payment middleware
+- [x] MCP tools endpoint
+- [x] AI-powered analysis
+- [ ] ERC-8004 on-chain registration (Base)
+- [ ] SKALE integration for gasless transactions
+- [ ] Multi-agent orchestration demo
+- [ ] Virtuals Agent Launchpad integration
+
+---
+
+## Team
+
+Built for the **SF Agentic Commerce x402 Hackathon** by passionate builders exploring the intersection of AI agents, sports analytics, and decentralized payments.
+
+---
+
+## Resources
+
+- [A2A + MCP Usage Guide](./a2a-mcp-guide.md)
+- [NBA Ingestion Guide](./nba-ingestion-guide.md)
+- [NBA API Sync Documentation](./nba-api-sync.md)
+- [x402 Protocol Specification](https://www.x402.org/)
+- [ERC-8004 Standard](https://eips.ethereum.org/EIPS/eip-8004)
+
+---
+
+## License
+
+MIT
+
+---
+
+> **Demo Video**: [Coming Soon]
+>
+> **Submission**: [DoraHacks x402 Hackathon](https://dorahacks.io/hackathon/x402)

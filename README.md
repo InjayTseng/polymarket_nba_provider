@@ -70,35 +70,40 @@ flowchart LR
 > **Demonstrates real-world workflow: Discover → Decide → Pay/Settle → Outcome**
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph DISCOVER["1️⃣ DISCOVER"]
-        U1[User opens OpenClaw]
-        U2[Browse NBA games today]
-        U3[Select LAL vs BOS matchup]
+        direction TB
+        U1[Open OpenClaw]
+        U2[Browse NBA games]
+        U3[Select matchup]
+        U1 --> U2 --> U3
     end
 
     subgraph DECIDE["2️⃣ DECIDE"]
-        D1[View game context & injury report]
-        D2[Check Polymarket odds]
+        direction TB
+        D1[View stats & injuries]
+        D2[Check market odds]
         D3[Request AI analysis]
+        D1 --> D2 --> D3
     end
 
-    subgraph PAY["3️⃣ PAY / SETTLE"]
-        P1[Receive 402 Payment Required]
-        P2[Approve $0.05 USDC on Base]
-        P3[x402 settles payment]
+    subgraph PAY["3️⃣ PAY/SETTLE"]
+        direction TB
+        P1[402 Payment Required]
+        P2[$0.05 USDC on Base]
+        P3[x402 settles]
+        P1 --> P2 --> P3
     end
 
     subgraph OUTCOME["4️⃣ OUTCOME"]
-        O1[Receive AI matchup analysis]
-        O2[View betting edge calculation]
-        O3[Make informed decision]
+        direction TB
+        O1[AI analysis delivered]
+        O2[Edge calculation]
+        O3[Informed decision]
+        O1 --> O2 --> O3
     end
 
-    U1 --> U2 --> U3
-    U3 --> D1 --> D2 --> D3
-    D3 --> P1 --> P2 --> P3
-    P3 --> O1 --> O2 --> O3
+    DISCOVER --> DECIDE --> PAY --> OUTCOME
 ```
 
 ### Step-by-Step Walkthrough
